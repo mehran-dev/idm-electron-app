@@ -12,7 +12,7 @@ export function App(){
   useEffect(()=>{window.downloads.list().then(setItems);return window.downloads.onChanged(setItems)},[])
   const visible=useMemo(()=>items.filter(item=>matchesCategory(item,category)),[items,category])
   const current=items.find(item=>item.id===selected)
-  async function add(){try{setError('');const item=await window.downloads.add(url.trim());setSelected(item.id);setUrl('');setDialog(false)}catch(e){setError(e instanceof Error?e.message:'Unable to start download')}}
+  async function add(queued=false){try{setError('');if(!window.downloads.version)throw new Error('Electron was not fully restarted after the queue update. Close every app window and start it again.');const item=queued?await window.downloads.enqueue(url.trim()):await window.downloads.add(url.trim());setSelected(item.id);setUrl('');setDialog(false)}catch(e){setError(e instanceof Error?e.message:'Unable to add download')}}
   const stopAll=()=>items.filter(i=>i.status==='downloading').forEach(i=>window.downloads.pause(i.id))
   return <div className="idm-app">
     <div className="titlebar"><span><HardDriveDownload size={16}/> Internet Download Manager</span><div><button>—</button><button>□</button><button className="close">×</button></div></div>
@@ -22,18 +22,18 @@ export function App(){
       <Tool icon={<CirclePlay/>} label="Resume" color="green" disabled={!current||!['paused','interrupted'].includes(current.status)} onClick={()=>current&&window.downloads.resume(current.id)}/>
       <Tool icon={<Square/>} label="Stop" color="red" disabled={!current||current.status!=='downloading'} onClick={()=>current&&window.downloads.pause(current.id)}/>
       <Tool icon={<CirclePause/>} label="Stop All" color="red" disabled={!items.some(i=>i.status==='downloading')} onClick={stopAll}/>
-      <Tool icon={<Trash2/>} label="Delete" color="red" disabled={!current||['completed','failed','cancelled'].includes(current.status)} onClick={()=>current&&window.downloads.cancel(current.id)}/>
+      <Tool icon={<Trash2/>} label="Delete" color="red" disabled={!current} onClick={()=>{if(current){window.downloads.cancel(current.id);setSelected(undefined)}}}/>
       <Tool icon={<X/>} label="Delete C..." color="gray" disabled/>
       <span className="separator"/>
       <Tool icon={<Settings/>} label="Options" color="blue"/>
       <Tool icon={<CalendarClock/>} label="Scheduler" color="orange"/>
-      <Tool icon={<ListStart/>} label="Start Queue" color="green"/>
-      <Tool icon={<Square/>} label="Stop Queue" color="red"/>
+      <Tool icon={<ListStart/>} label="Start Queue" color="green" disabled={!items.some(i=>i.status==='queued')} onClick={()=>window.downloads.startQueue()}/>
+      <Tool icon={<Square/>} label="Stop Queue" color="red" onClick={()=>window.downloads.stopQueue()}/>
       <Tool icon={<Globe2/>} label="Grabber" color="blue"/>
     </div>
     <div className="workspace"><CategoryTree value={category} onChange={setCategory} items={items}/><DownloadTable items={visible} selected={selected} onSelect={setSelected}/></div>
     <div className="statusbar"><span>{items.filter(i=>i.status==='completed').length} completed</span><span>{items.filter(i=>i.status==='downloading').length} downloading</span><span>{items.length} file{items.length===1?'':'s'}</span><button onClick={()=>window.downloads.openFolder()}><FolderOpen size={13}/> Downloads</button></div>
-    {dialog&&<div className="dialog-shade" onMouseDown={()=>setDialog(false)}><div className="dialog" onMouseDown={e=>e.stopPropagation()}><div className="dialog-title">Enter new address to download<button onClick={()=>setDialog(false)}>×</button></div><div className="dialog-body"><div className="url-row"><Globe2 size={42}/><div><label>Address</label><input autoFocus value={url} onChange={e=>setUrl(e.target.value)} onKeyDown={e=>e.key==='Enter'&&url.trim()&&add()} /></div></div>{error&&<p className="dialog-error">{error}</p>}<fieldset><legend>Authorization</legend><label className="check"><input type="checkbox"/> Use authorization</label><div className="auth"><label>Login <input disabled/></label><label>Password <input disabled type="password"/></label></div></fieldset></div><div className="dialog-actions"><button className="primary" disabled={!url.trim()} onClick={add}>OK</button><button onClick={()=>setDialog(false)}>Cancel</button></div></div></div>}
+    {dialog&&<div className="dialog-shade" onMouseDown={()=>setDialog(false)}><div className="dialog" onMouseDown={e=>e.stopPropagation()}><div className="dialog-title">Enter new address to download<button onClick={()=>setDialog(false)}>×</button></div><div className="dialog-body"><div className="url-row"><Globe2 size={42}/><div><label>Address</label><input autoFocus value={url} onChange={e=>setUrl(e.target.value)} onKeyDown={e=>e.key==='Enter'&&url.trim()&&add(false)} /></div></div>{error&&<p className="dialog-error">{error}</p>}<fieldset><legend>Authorization</legend><label className="check"><input type="checkbox"/> Use authorization</label><div className="auth"><label>Login <input disabled/></label><label>Password <input disabled type="password"/></label></div></fieldset></div><div className="dialog-actions"><button disabled={!url.trim()} onClick={()=>add(true)}>Download later</button><button className="primary" disabled={!url.trim()} onClick={()=>add(false)}>Start download</button><button onClick={()=>setDialog(false)}>Cancel</button></div></div></div>}
   </div>
 }
 

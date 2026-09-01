@@ -5,4 +5,6 @@ export class InMemoryDownloadRepository implements DownloadRepository{
   all=()=>[...this.items.values()].sort((a,b)=>b.createdAt.localeCompare(a.createdAt))
   get=(id:string)=>this.items.get(id)
   save=(item:DownloadItem)=>{this.items.set(item.id,{...item})}
+  remove=(id:string)=>{this.items.delete(id)}
+  flush=()=>{}
 }
