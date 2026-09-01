@@ -14,6 +14,7 @@ export class DownloadService{
   pause=(id:string)=>this.engine.pause(id)
   resume=(id:string)=>{const item=this.repo.get(id);if(!item)return;if(this.engine.isActive(id))this.engine.resume(id);else this.engine.start(item.id,item.url,item.fileName)}
   cancel=(id:string)=>{const item=this.repo.get(id);if(!item)return;if(['queued','completed','failed','cancelled','interrupted'].includes(item.status)){this.repo.remove(id);this.notify();return}this.engine.cancel(id)}
+  deleteCompleted=()=>{for(const item of this.repo.all())if(item.status==='completed')this.repo.remove(item.id);this.repo.flush();this.notify()}
   createQueue(name:string,concurrency:number){const queue:DownloadQueue={id:randomUUID(),name:name.trim()||'New queue',concurrency:this.limit(concurrency),createdAt:new Date().toISOString()};this.repo.saveQueue(queue);return queue}
   updateQueue(id:string,name:string,concurrency:number){const queue=this.repo.getQueue(id);if(!queue)return;queue.name=name.trim()||queue.name;queue.concurrency=this.limit(concurrency);this.repo.saveQueue(queue);this.fillQueue(id)}
   deleteQueue(id:string){const queue=this.repo.getQueue(id);if(!queue||this.repo.allQueues().length===1)return;this.stopQueue(id);const fallback=this.repo.allQueues().find(q=>q.id!==id)!;for(const item of this.repo.all())if(item.queueId===id&&item.status!=='completed'){item.queueId=fallback.id;this.repo.save(item)}this.repo.removeQueue(id);this.notify()}
