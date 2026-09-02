@@ -1,5 +1,26 @@
 # Nexus Download Manager
 
+An Electron, React, and TypeScript download manager inspired by IDM.
+
+## Development
+
+```bash
+npm install
+npm run dev
+```
+
+Quality commands:
+
+```bash
+npm run format       # format source and configuration
+npm run format:check # verify formatting in CI
+npm run typecheck    # strict TypeScript validation
+npm run check        # formatting + types
+npm run build        # typecheck + production bundles
+```
+
+Read [ARCHITECTURE.md](./ARCHITECTURE.md) before adding IPC methods or moving logic between Electron processes.
+
 Electron + React + TypeScript foundation for an IDM-style desktop download manager.
 
 ## Start
