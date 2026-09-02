@@ -1330,15 +1330,26 @@ function CategoryTree({
         </div>
       </div>
       <div className="tree">
-        <button
-          className={value === 'all' ? 'selected' : ''}
-          title={downloadsOpen ? 'Collapse All Downloads' : 'Expand All Downloads'}
-          onClick={() => {
-            setDownloadsOpen((open) => !open)
-            onChange('all')
-          }}
-        >
-          {downloadsOpen ? <ChevronDown className="chev" /> : <ChevronRight className="chev" />}
+        <button className={value === 'all' ? 'selected' : ''} onClick={() => onChange('all')}>
+          <span
+            className="tree-toggle"
+            role="button"
+            tabIndex={0}
+            title={downloadsOpen ? 'Collapse All Downloads' : 'Expand All Downloads'}
+            onClick={(event) => {
+              event.stopPropagation()
+              setDownloadsOpen((open) => !open)
+            }}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault()
+                event.stopPropagation()
+                setDownloadsOpen((open) => !open)
+              }
+            }}
+          >
+            {downloadsOpen ? <ChevronDown className="chev" /> : <ChevronRight className="chev" />}
+          </span>
           <span className="tree-icon">
             <Folder />
           </span>
@@ -1358,15 +1369,26 @@ function CategoryTree({
               {count !== undefined && <em>{count}</em>}
             </button>
           ))}
-        <button
-          className={value === 'queues' ? 'selected' : ''}
-          title={queuesOpen ? 'Collapse Queues' : 'Expand Queues'}
-          onClick={() => {
-            setQueuesOpen((open) => !open)
-            onChange('queues')
-          }}
-        >
-          {queuesOpen ? <ChevronDown className="chev" /> : <ChevronRight className="chev" />}
+        <button className={value === 'queues' ? 'selected' : ''} onClick={() => onChange('queues')}>
+          <span
+            className="tree-toggle"
+            role="button"
+            tabIndex={0}
+            title={queuesOpen ? 'Collapse Queues' : 'Expand Queues'}
+            onClick={(event) => {
+              event.stopPropagation()
+              setQueuesOpen((open) => !open)
+            }}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault()
+                event.stopPropagation()
+                setQueuesOpen((open) => !open)
+              }
+            }}
+          >
+            {queuesOpen ? <ChevronDown className="chev" /> : <ChevronRight className="chev" />}
+          </span>
           <span className="tree-icon">
             <ListStart />
           </span>
@@ -1406,22 +1428,67 @@ function DownloadTable({
   onOpen: (id: string) => void
   onContext: (event: React.MouseEvent, item: DownloadItem) => void
 }) {
+  type SortKey = 'fileName' | 'size' | 'status' | 'timeLeft' | 'speed' | 'date' | 'description'
+  const [sort, setSort] = useState<{ key: SortKey; direction: 'asc' | 'desc' }>({
+    key: 'date',
+    direction: 'desc',
+  })
+  const sortedItems = useMemo(() => {
+    const value = (item: DownloadItem, key: SortKey): string | number => {
+      if (key === 'fileName') return item.fileName.toLocaleLowerCase()
+      if (key === 'size') return item.totalBytes
+      if (key === 'status') return status(item).toLocaleLowerCase()
+      if (key === 'timeLeft')
+        return item.speed && item.totalBytes
+          ? Math.max(0, (item.totalBytes - item.receivedBytes) / item.speed)
+          : Number.POSITIVE_INFINITY
+      if (key === 'speed') return item.speed
+      if (key === 'date') return new Date(item.createdAt).getTime()
+      return (item.error ?? `${item.segmentCount ?? 1} connection(s)`).toLocaleLowerCase()
+    }
+    return [...items].sort((left, right) => {
+      const a = value(left, sort.key)
+      const b = value(right, sort.key)
+      const comparison =
+        typeof a === 'number' && typeof b === 'number'
+          ? a - b
+          : String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: 'base' })
+      return sort.direction === 'asc' ? comparison : -comparison
+    })
+  }, [items, sort])
+  const changeSort = (key: SortKey) =>
+    setSort((current) => ({
+      key,
+      direction: current.key === key && current.direction === 'asc' ? 'desc' : 'asc',
+    }))
+  const header = (key: SortKey, label: string) => (
+    <span
+      aria-sort={
+        sort.key === key ? (sort.direction === 'asc' ? 'ascending' : 'descending') : 'none'
+      }
+    >
+      <button onClick={() => changeSort(key)}>
+        {label}
+        <i>{sort.key === key ? (sort.direction === 'asc' ? '▲' : '▼') : ''}</i>
+      </button>
+    </span>
+  )
   return (
     <section className="downloads-table">
       <div className="columns">
-        <span>File Name</span>
-        <span>Size</span>
-        <span>Status</span>
-        <span>Time left</span>
-        <span>Transfer rate</span>
-        <span>Last Try Date</span>
-        <span>Description</span>
+        {header('fileName', 'File Name')}
+        {header('size', 'Size')}
+        {header('status', 'Status')}
+        {header('timeLeft', 'Time left')}
+        {header('speed', 'Transfer rate')}
+        {header('date', 'Last Try Date')}
+        {header('description', 'Description')}
       </div>
       <div className="rows">
         {items.length === 0 ? (
           <div className="no-downloads">There are no files in this category.</div>
         ) : (
-          items.map((item) => (
+          sortedItems.map((item) => (
             <div
               className={`download-row ${selected.has(item.id) ? 'selected' : ''}`}
               onClick={(event) => onSelect(event, item.id)}

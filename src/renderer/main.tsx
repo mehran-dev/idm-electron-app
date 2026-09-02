@@ -5,6 +5,7 @@ import './styles.css'
 import './download-dialog.css'
 import './completion.css'
 import './completed-download.css'
+import './sorting.css'
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <App />

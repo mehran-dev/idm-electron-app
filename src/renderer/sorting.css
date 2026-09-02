@@ -1,0 +1,47 @@
+.tree-toggle {
+  width: 16px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  flex: none;
+  margin-left: -2px;
+  border-radius: 2px;
+  cursor: pointer;
+}
+.tree-toggle:hover,
+.tree-toggle:focus-visible {
+  background: #badcff;
+  outline: 1px solid #75afe0;
+}
+.tree-toggle .chev {
+  pointer-events: none;
+}
+.columns span {
+  padding: 0;
+}
+.columns span > button {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  padding: 5px 6px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  color: inherit;
+}
+.columns span > button:hover {
+  background: linear-gradient(#f2f8fe, #d6eafa);
+}
+.columns span > button:focus-visible {
+  outline: 2px solid #2783d4;
+  outline-offset: -2px;
+}
+.columns span > button i {
+  min-width: 9px;
+  font-size: 8px;
+  font-style: normal;
+  color: #266da9;
+}
