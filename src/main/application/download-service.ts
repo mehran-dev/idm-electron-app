@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { basename } from 'node:path'
-import type { DownloadItem,DownloadQueue } from '../../shared/download'
+import type { CompletionOptions,DownloadItem,DownloadQueue } from '../../shared/download'
 import type { DownloadRepository } from '../domain/download-repository'
 import type { ElectronDownloadEngine } from '../infrastructure/electron-download-engine'
 
@@ -13,6 +13,8 @@ export class DownloadService{
   getSegmentCount=()=>this.repo.getSegmentCount()
   setSegmentCount=(value:number)=>this.repo.setSegmentCount([1,2,4,6,8].includes(value)?value:4)
   setItemSegmentCount=(id:string,value:number)=>{const item=this.repo.get(id);if(!item||this.engine.isActive(id))return;item.segmentCount=[1,2,4,6,8].includes(value)?value:this.repo.getSegmentCount();this.repo.save(item);this.notify()}
+  setCompletion=(id:string,options:CompletionOptions)=>{const item=this.repo.get(id);if(!item)return;item.completion=options;this.repo.save(item);this.notify()}
+  setQueueCompletion=(id:string,options:CompletionOptions)=>{const queue=this.repo.getQueue(id);if(!queue)return;queue.completion=options;this.repo.saveQueue(queue);this.notify()}
   add(urlValue:string,segmentCount?:number,savePath?:string){const item=this.create(urlValue,segmentCount,savePath);this.engine.start(item.id,item.url,item.fileName);return item}
   enqueue=(urlValue:string,queueId='main',segmentCount?:number,savePath?:string)=>{const item=this.create(urlValue,segmentCount,savePath);const queue=this.repo.getQueue(queueId)??this.repo.allQueues()[0];item.queueId=queue?.id;this.repo.save(item);this.notify();return item}
   pause=(id:string)=>this.engine.pause(id)
