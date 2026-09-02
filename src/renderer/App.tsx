@@ -1118,7 +1118,12 @@ function DownloadProgress({ item, onClose }: { item: DownloadItem; onClose: () =
               <span>{formatBytes(item.totalBytes) || 'Unknown'}</span>
               <label>Downloaded:</label>
               <span>
-                {formatBytes(item.receivedBytes)} ({percent.toFixed(2)}%)
+                {formatBytes(
+                  item.totalBytes > 0
+                    ? Math.min(item.receivedBytes, item.totalBytes)
+                    : item.receivedBytes,
+                )}{' '}
+                ({percent.toFixed(2)}%)
               </span>
               <label>Transfer rate:</label>
               <span>{item.speed ? `${formatBytes(item.speed)}/sec` : '0 B/sec'}</span>
@@ -1528,7 +1533,7 @@ function status(item: DownloadItem) {
   if (item.status === 'completed') return 'Complete'
   if (item.status === 'downloading')
     return item.totalBytes
-      ? `${((item.receivedBytes / item.totalBytes) * 100).toFixed(2)}%`
+      ? `${Math.min(100, (item.receivedBytes / item.totalBytes) * 100).toFixed(2)}%`
       : 'Receiving data...'
   return item.status.charAt(0).toUpperCase() + item.status.slice(1)
 }

@@ -17,6 +17,8 @@ interface ActiveDownload {
   lastBytes: number
   lastTime: number
   lastNotify: number
+  generation: number
+  fallbackUsed: boolean
 }
 export class ElectronDownloadEngine {
   private readonly active = new Map<string, ActiveDownload>()
@@ -59,6 +61,8 @@ export class ElectronDownloadEngine {
         lastBytes: 0,
         lastTime: Date.now(),
         lastNotify: 0,
+        generation: 0,
+        fallbackUsed: false,
       }
       this.active.set(id, state)
       item.savePath = savePath
@@ -131,8 +135,9 @@ export class ElectronDownloadEngine {
           return Array.isArray(value) ? (value[0] ?? '') : (value ?? '')
         }
         const contentRange = header('content-range')
-        const total = Number(contentRange.match(/\/(\d+)$/)?.[1] ?? header('content-length') ?? 0)
-        const ranges = response.statusCode === 206
+        const match = contentRange.match(/^bytes\s+0-0\/(\d+)$/i)
+        const ranges = response.statusCode === 206 && Boolean(match)
+        const total = Number(match?.[1] ?? header('content-length') ?? 0)
         settled = true
         resolve({ total, ranges })
         request.abort()
@@ -147,46 +152,112 @@ export class ElectronDownloadEngine {
     const state = this.active.get(id),
       item = this.repo.get(id)
     if (!state || !item || state.paused || state.cancelled) return
+    const generation = state.generation
     for (const segment of state.segments.filter((value) => !value.done))
-      this.runSegment(id, item.url, segment, state)
+      this.runSegment(id, item.url, segment, state, generation)
   }
-  private runSegment(id: string, url: string, segment: Segment, state: ActiveDownload) {
+  private runSegment(
+    id: string,
+    url: string,
+    segment: Segment,
+    state: ActiveDownload,
+    generation: number,
+  ) {
+    const requestedStart = segment.start + segment.received
     const request = net.request({ url, method: 'GET', session: this.session, redirect: 'follow' })
     state.requests.add(request)
-    if (segment.end >= 0)
-      request.setHeader('Range', `bytes=${segment.start + segment.received}-${segment.end}`)
+    if (segment.end >= 0) request.setHeader('Range', `bytes=${requestedStart}-${segment.end}`)
     request.on('response', (response) => {
+      if (generation !== state.generation) return
       if (response.statusCode >= 400) {
         this.fail(id, new Error(`Server returned HTTP ${response.statusCode}`))
         return
       }
+      const contentRangeValue = response.headers['content-range']
+      const contentRange = Array.isArray(contentRangeValue)
+        ? (contentRangeValue[0] ?? '')
+        : (contentRangeValue ?? '')
+      const range = contentRange.match(/^bytes\s+(\d+)-(\d+)\/(\d+|\*)$/i)
+      const mustHonorRange = state.segments.length > 1 || requestedStart > 0
+      const validRange =
+        response.statusCode === 206 &&
+        Number(range?.[1]) === requestedStart &&
+        Number(range?.[2]) <= segment.end
+      if (mustHonorRange && !validRange) {
+        this.fallbackToSingleConnection(id, url, state, generation)
+        return
+      }
       response.on('data', (chunk: Buffer) => {
-        if (state.paused || state.cancelled) return
-        writeSync(state.file, chunk, 0, chunk.length, segment.start + segment.received)
-        segment.received += chunk.length
+        if (state.paused || state.cancelled || generation !== state.generation) return
+        const remaining =
+          segment.end >= 0
+            ? Math.max(0, segment.end - (segment.start + segment.received) + 1)
+            : chunk.length
+        const bytesToWrite = Math.min(chunk.length, remaining)
+        if (bytesToWrite === 0) return
+        writeSync(state.file, chunk, 0, bytesToWrite, segment.start + segment.received)
+        segment.received += bytesToWrite
         this.progress(id, state)
       })
       response.on('end', () => {
         state.requests.delete(request)
-        if (state.paused || state.cancelled) return
+        if (state.paused || state.cancelled || generation !== state.generation) return
+        const expected = segment.end >= 0 ? segment.end - segment.start + 1 : segment.received
+        if (segment.received < expected) {
+          this.fail(id, new Error('The server ended a file segment before all bytes arrived.'))
+          return
+        }
         segment.done = true
         if (state.segments.every((value) => value.done)) this.complete(id, state)
       })
       response.on('error', (error) => {
         state.requests.delete(request)
-        if (!state.paused && !state.cancelled) this.fail(id, error)
+        if (!state.paused && !state.cancelled && generation === state.generation)
+          this.fail(id, error)
       })
     })
     request.on('error', (error) => {
       state.requests.delete(request)
-      if (!state.paused && !state.cancelled) this.fail(id, error)
+      if (!state.paused && !state.cancelled && generation === state.generation) this.fail(id, error)
     })
     request.end()
+  }
+  private fallbackToSingleConnection(
+    id: string,
+    url: string,
+    state: ActiveDownload,
+    generation: number,
+  ) {
+    if (generation !== state.generation) return
+    if (state.fallbackUsed) {
+      this.fail(id, new Error('The server does not reliably support resuming this download.'))
+      return
+    }
+    state.fallbackUsed = true
+    state.generation += 1
+    for (const activeRequest of state.requests) activeRequest.abort()
+    state.requests.clear()
+    const item = this.repo.get(id)
+    if (!item) return
+    state.segments = [
+      { start: 0, end: item.totalBytes > 0 ? item.totalBytes - 1 : -1, received: 0, done: false },
+    ]
+    state.lastBytes = 0
+    state.lastTime = Date.now()
+    if (item.totalBytes > 0) ftruncateSync(state.file, item.totalBytes)
+    item.receivedBytes = 0
+    item.segmentProgress = [0]
+    item.error = 'Server ignored parallel ranges; safely switched to one connection.'
+    this.repo.save(item)
+    this.changed()
+    this.runSegments(id)
+    console.warn('[Download range fallback]', { url, reason: 'Invalid Content-Range response' })
   }
   private progress(id: string, state: ActiveDownload) {
     const item = this.repo.get(id)
     if (!item) return
-    const bytes = state.segments.reduce((sum, value) => sum + value.received, 0),
+    const measuredBytes = state.segments.reduce((sum, value) => sum + value.received, 0),
+      bytes = item.totalBytes > 0 ? Math.min(item.totalBytes, measuredBytes) : measuredBytes,
       now = Date.now()
     item.receivedBytes = bytes
     item.segmentProgress = state.segments.map((segment) =>
@@ -211,7 +282,9 @@ export class ElectronDownloadEngine {
     this.active.delete(id)
     const item = this.repo.get(id)
     if (item) {
-      item.receivedBytes = state.segments.reduce((sum, value) => sum + value.received, 0)
+      const measuredBytes = state.segments.reduce((sum, value) => sum + value.received, 0)
+      item.receivedBytes =
+        item.totalBytes > 0 ? Math.min(item.totalBytes, measuredBytes) : measuredBytes
       item.speed = 0
       item.status = 'completed'
       this.repo.save(item)
