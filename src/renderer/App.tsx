@@ -1132,8 +1132,17 @@ function DownloadProgress({ item, onClose }: { item: DownloadItem; onClose: () =
               <label>Resume capability:</label>
               <span>{item.totalBytes ? 'Yes' : 'Unknown'}</span>
             </div>
-            <div className="overall-progress">
-              <i style={{ width: `${percent}%` }} />
+            <div
+              className="overall-progress segmented-progress"
+              title={`${percent.toFixed(2)}% total — ${item.segmentProgress?.length ?? item.segmentCount ?? 1} connection(s)`}
+            >
+              {(
+                item.segmentProgress ?? Array.from({ length: item.segmentCount ?? 1 }, () => 0)
+              ).map((segmentPercent, index) => (
+                <span className="overall-segment" key={index}>
+                  <i style={{ width: `${Math.min(100, segmentPercent)}%` }} />
+                </span>
+              ))}
             </div>
             <div className="segment-head">
               <b>Connection details</b>

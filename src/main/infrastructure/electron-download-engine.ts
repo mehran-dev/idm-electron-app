@@ -188,7 +188,8 @@ export class ElectronDownloadEngine {
         return
       }
       response.on('data', (chunk: Buffer) => {
-        if (state.paused || state.cancelled || generation !== state.generation) return
+        if (state.paused || state.cancelled || segment.done || generation !== state.generation)
+          return
         const remaining =
           segment.end >= 0
             ? Math.max(0, segment.end - (segment.start + segment.received) + 1)
@@ -198,29 +199,46 @@ export class ElectronDownloadEngine {
         writeSync(state.file, chunk, 0, bytesToWrite, segment.start + segment.received)
         segment.received += bytesToWrite
         this.progress(id, state)
+        const expected = segment.end >= 0 ? segment.end - segment.start + 1 : 0
+        if (expected > 0 && segment.received === expected) {
+          this.finishSegment(id, segment, state, request)
+          request.abort()
+        }
       })
       response.on('end', () => {
         state.requests.delete(request)
-        if (state.paused || state.cancelled || generation !== state.generation) return
+        if (state.paused || state.cancelled || segment.done || generation !== state.generation)
+          return
         const expected = segment.end >= 0 ? segment.end - segment.start + 1 : segment.received
         if (segment.received < expected) {
           this.fail(id, new Error('The server ended a file segment before all bytes arrived.'))
           return
         }
-        segment.done = true
-        if (state.segments.every((value) => value.done)) this.complete(id, state)
+        this.finishSegment(id, segment, state, request)
       })
       response.on('error', (error) => {
         state.requests.delete(request)
-        if (!state.paused && !state.cancelled && generation === state.generation)
+        if (!state.paused && !state.cancelled && !segment.done && generation === state.generation)
           this.fail(id, error)
       })
     })
     request.on('error', (error) => {
       state.requests.delete(request)
-      if (!state.paused && !state.cancelled && generation === state.generation) this.fail(id, error)
+      if (!state.paused && !state.cancelled && !segment.done && generation === state.generation)
+        this.fail(id, error)
     })
     request.end()
+  }
+  private finishSegment(
+    id: string,
+    segment: Segment,
+    state: ActiveDownload,
+    request: ClientRequest,
+  ) {
+    if (segment.done) return
+    segment.done = true
+    state.requests.delete(request)
+    if (state.segments.every((value) => value.done)) this.complete(id, state)
   }
   private fallbackToSingleConnection(
     id: string,
