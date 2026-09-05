@@ -13,6 +13,12 @@ body {
   min-height: 600px;
   overflow: hidden;
 }
+body:has(.native-list-dialog),
+body:has(.native-dialog-host) {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+}
 button,
 input {
   font: inherit;
@@ -750,6 +756,45 @@ legend {
   box-shadow: 0 10px 35px #0008;
   display: flex;
   flex-direction: column;
+}
+.native-list-dialog,
+.native-dialog-host {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 10px;
+  background: #e8e8e8;
+}
+.native-list-dialog .import-dialog {
+  width: 100%;
+  max-width: 540px;
+}
+.native-dialog-host > .dialog-shade {
+  position: static;
+  display: block;
+  background: transparent;
+}
+.native-dialog-host .dialog-title {
+  display: none;
+}
+.native-dialog-host .scheduler-dialog,
+.native-dialog-host .options-dialog,
+.native-dialog-host .file-info-dialog,
+.native-dialog-host .confirm-dialog {
+  width: min(100%, var(--dialog-width, 720px));
+  max-height: calc(100vh - 20px);
+}
+.native-dialog-host .scheduler-dialog {
+  --dialog-width: 650px;
+}
+.native-dialog-host .options-dialog {
+  --dialog-width: 730px;
+}
+.native-dialog-host .file-info-dialog {
+  --dialog-width: 590px;
+}
+.native-dialog-host .confirm-dialog {
+  --dialog-width: 510px;
 }
 .scheduler-dialog {
   width: 650px;

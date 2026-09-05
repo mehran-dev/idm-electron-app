@@ -137,6 +137,42 @@ export function registerDownloadDialogHandlers(
       } else child.loadFile(join(__dirname, '../renderer/index.html'), { query })
     },
   )
+  ipcMain.handle(
+    IPC.showUtilityWindow,
+    (_event, mode: 'add' | 'scheduler' | 'options' | 'delete', ids: string[], queueId?: string) => {
+      const sizes = {
+        add: [620, 590],
+        scheduler: [680, 570],
+        options: [760, 620],
+        delete: [540, 300],
+      } as const
+      const titles = {
+        add: 'Add download',
+        scheduler: 'Scheduler',
+        options: 'Options',
+        delete: 'Confirm file deletion',
+      }
+      const [width, height] = sizes[mode]
+      const child = new BrowserWindow({
+        width,
+        height,
+        minWidth: Math.min(width, 500),
+        minHeight: Math.min(height, 280),
+        title: titles[mode],
+        autoHideMenuBar: true,
+        webPreferences: {
+          preload: join(__dirname, '../preload/index.cjs'),
+          contextIsolation: true,
+          nodeIntegration: false,
+          sandbox: true,
+        },
+      })
+      const query = { utilityDialog: mode, ids: ids.join(','), queueId: queueId ?? '' }
+      if (process.env.ELECTRON_RENDERER_URL) {
+        child.loadURL(`${process.env.ELECTRON_RENDERER_URL}?${new URLSearchParams(query)}`)
+      } else child.loadFile(join(__dirname, '../renderer/index.html'), { query })
+    },
+  )
   ipcMain.removeHandler(IPC.startNow)
   ipcMain.handle(IPC.startNow, (_e, url: string, segments?: number, path?: string) =>
     service.add(url, segments, path),

@@ -12,6 +12,7 @@ export const IPC = {
   chooseSavePath: 'downloads:choose-save-path',
   showProgress: 'downloads:show-progress',
   showListWindow: 'downloads:show-list-window',
+  showUtilityWindow: 'downloads:show-utility-window',
   add: 'downloads:add',
   startNow: 'downloads:start-now',
   enqueue: 'downloads:enqueue',
@@ -49,6 +50,11 @@ export interface DownloadApi {
   chooseSavePath(path: string): Promise<string | undefined>
   showProgress(id: string): Promise<void>
   showListWindow(mode: 'import' | 'export', ids: string[], queueId?: string): Promise<void>
+  showUtilityWindow(
+    mode: 'add' | 'scheduler' | 'options' | 'delete',
+    ids?: string[],
+    queueId?: string,
+  ): Promise<void>
   add(
     url: string,
     queued?: boolean,

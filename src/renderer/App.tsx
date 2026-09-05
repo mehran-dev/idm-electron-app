@@ -57,10 +57,257 @@ export function App() {
   const params = new URLSearchParams(location.search)
   const id = params.get('progress')
   const listDialog = params.get('listDialog')
+  const utilityDialog = params.get('utilityDialog')
   if (id) return <ProgressWindow id={id} />
   if (listDialog === 'import' || listDialog === 'export')
     return <ListDialogWindow mode={listDialog} params={params} />
+  if (['add', 'scheduler', 'options', 'delete'].includes(utilityDialog ?? ''))
+    return (
+      <UtilityDialogWindow
+        mode={utilityDialog as 'add' | 'scheduler' | 'options' | 'delete'}
+        params={params}
+      />
+    )
   return <MainApp />
+}
+
+function UtilityDialogWindow({
+  mode,
+  params,
+}: {
+  mode: 'add' | 'scheduler' | 'options' | 'delete'
+  params: URLSearchParams
+}) {
+  const [queues, setQueues] = useState<DownloadQueue[]>([])
+  const [segmentCount, setSegmentCount] = useState(4)
+  const initialQueue = params.get('queueId') ?? ''
+  useEffect(() => {
+    window.downloads.listQueues().then(setQueues)
+    window.downloads.getSegmentCount().then(setSegmentCount)
+  }, [])
+  if (mode === 'add')
+    return (
+      <AddDownloadWindow queues={queues} segmentCount={segmentCount} initialQueue={initialQueue} />
+    )
+  if (mode === 'scheduler')
+    return (
+      <div className="native-dialog-host">
+        <SchedulerDialog
+          queues={queues}
+          initialQueue={initialQueue}
+          onClose={() => window.close()}
+          onSave={async (id, name, concurrency) => {
+            await window.downloads.updateQueue(id, name, concurrency)
+            setQueues(await window.downloads.listQueues())
+          }}
+          onCreate={async () => {
+            const queue = await window.downloads.createQueue('New download queue', 1)
+            setQueues(await window.downloads.listQueues())
+            return queue
+          }}
+          onDelete={async (id) => {
+            await window.downloads.deleteQueue(id)
+            const next = await window.downloads.listQueues()
+            setQueues(next)
+            return next
+          }}
+        />
+      </div>
+    )
+  if (mode === 'options')
+    return (
+      <div className="native-dialog-host">
+        <OptionsDialog
+          segmentCount={segmentCount}
+          onSave={async (value) => {
+            await window.downloads.setSegmentCount(value)
+            window.close()
+          }}
+          onClose={() => window.close()}
+        />
+      </div>
+    )
+  return <DeleteFilesWindow ids={params.get('ids')?.split(',').filter(Boolean) ?? []} />
+}
+
+function DeleteFilesWindow({ ids }: { ids: string[] }) {
+  const [items, setItems] = useState<DownloadItem[]>([])
+  useEffect(() => {
+    window.downloads.list().then((all) => setItems(all.filter((item) => ids.includes(item.id))))
+  }, [])
+  return (
+    <div className="native-dialog-host native-confirm">
+      <div className="window-dialog confirm-dialog">
+        <div className="confirm-body">
+          <Trash2 />
+          <div>
+            <b>
+              Delete {items.length} file{items.length === 1 ? '' : 's'} permanently?
+            </b>
+            <p>{items.map((item) => item.fileName).join(', ')}</p>
+            <small>This removes the physical files and download-history entries.</small>
+          </div>
+        </div>
+        <div className="dialog-actions">
+          <button
+            className="danger-button"
+            disabled={!items.length}
+            onClick={() => {
+              items.forEach((item) => window.downloads.deleteFromDisk(item.id))
+              window.close()
+            }}
+          >
+            Delete files
+          </button>
+          <button className="primary" onClick={() => window.close()}>
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function AddDownloadWindow({
+  queues,
+  segmentCount,
+  initialQueue,
+}: {
+  queues: DownloadQueue[]
+  segmentCount: number
+  initialQueue: string
+}) {
+  const [url, setUrl] = useState('')
+  const [preview, setPreview] = useState<DownloadPreview>()
+  const [error, setError] = useState('')
+  const [inspecting, setInspecting] = useState(false)
+  const [segments, setSegments] = useState(segmentCount)
+  const [queueId, setQueueId] = useState(initialQueue)
+  useEffect(() => {
+    if (!queueId && queues[0]) setQueueId(queues[0].id)
+  }, [queues, queueId])
+  useEffect(() => {
+    if (!url.trim()) return setPreview(undefined)
+    try {
+      const parsed = new URL(url.trim())
+      if (!['http:', 'https:'].includes(parsed.protocol)) return
+    } catch {
+      return
+    }
+    let active = true
+    setInspecting(true)
+    setError('')
+    const timer = setTimeout(
+      () =>
+        window.downloads
+          .inspect(url.trim())
+          .then((value) => active && setPreview(value))
+          .catch(
+            (reason) =>
+              active &&
+              setError(
+                reason instanceof Error ? reason.message : 'Unable to retrieve file information',
+              ),
+          )
+          .finally(() => active && setInspecting(false)),
+      450,
+    )
+    return () => {
+      active = false
+      clearTimeout(timer)
+    }
+  }, [url])
+  const start = async (later: boolean) => {
+    if (!preview) return
+    const item = later
+      ? await window.downloads.enqueue(url.trim(), queueId, segments, preview.savePath)
+      : await window.downloads.add(url.trim(), false, undefined, segments, preview.savePath)
+    if (!later) await window.downloads.showProgress(item.id)
+    window.close()
+  }
+  const browse = async () => {
+    if (!preview) return
+    const path = await window.downloads.chooseSavePath(preview.savePath)
+    if (path)
+      setPreview({
+        ...preview,
+        savePath: path,
+        fileName: path.split(/[\\/]/).pop() || preview.fileName,
+      })
+  }
+  return (
+    <div className="native-dialog-host">
+      <div className="dialog file-info-dialog">
+        <div className="dialog-body">
+          <div className="url-row">
+            <Globe2 size={42} />
+            <div>
+              <label>Address</label>
+              <input autoFocus value={url} onChange={(event) => setUrl(event.target.value)} />
+            </div>
+          </div>
+          {inspecting && !preview && <p className="query-status">Getting file information…</p>}
+          {error && <p className="dialog-error">{error}</p>}
+          {preview && (
+            <>
+              <div className="file-overview">
+                <FileIcon name={preview.fileName} />
+                <div>
+                  <b>{preview.fileName}</b>
+                  <span>
+                    {preview.mimeType} · {preview.size ? formatBytes(preview.size) : 'Size unknown'}
+                  </span>
+                </div>
+              </div>
+              <div className="file-destination">
+                <label className="save-as-row">
+                  Save As{' '}
+                  <input
+                    value={preview.savePath}
+                    onChange={(event) => setPreview({ ...preview, savePath: event.target.value })}
+                  />
+                  <button onClick={browse}>…</button>
+                </label>
+              </div>
+              <fieldset>
+                <legend>Download options</legend>
+                <label>
+                  Connections{' '}
+                  <select
+                    value={segments}
+                    onChange={(event) => setSegments(Number(event.target.value))}
+                  >
+                    {[1, 2, 4, 6, 8].map((value) => (
+                      <option key={value}>{value}</option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Download later in{' '}
+                  <select value={queueId} onChange={(event) => setQueueId(event.target.value)}>
+                    {queues.map((queue) => (
+                      <option value={queue.id} key={queue.id}>
+                        {queue.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </fieldset>
+            </>
+          )}
+        </div>
+        <div className="dialog-actions">
+          <button disabled={!preview || !queueId} onClick={() => start(true)}>
+            Download Later
+          </button>
+          <button className="primary" disabled={!preview} onClick={() => start(false)}>
+            Start Download
+          </button>
+          <button onClick={() => window.close()}>Cancel</button>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 function ListDialogWindow({
@@ -344,6 +591,14 @@ function MainApp() {
     return window.downloads.onChanged(setItems)
   }, [])
   useEffect(() => {
+    const refreshSettings = () => {
+      window.downloads.listQueues().then(setQueues)
+      window.downloads.getSegmentCount().then(setSegmentCount)
+    }
+    window.addEventListener('focus', refreshSettings)
+    return () => window.removeEventListener('focus', refreshSettings)
+  }, [])
+  useEffect(() => {
     if (!dialog || !url.trim()) {
       setPreview(undefined)
       return
@@ -412,7 +667,7 @@ function MainApp() {
         fileName: path.split(/[\\/]/).pop() || preview.fileName,
       })
   }
-  const openQueueManager = () => setScheduler(true)
+  const openQueueManager = () => window.downloads.showUtilityWindow('scheduler', [], selectedQueue)
   async function importList() {
     setImportMessage('')
     if (!selectedQueue) {
@@ -499,8 +754,7 @@ function MainApp() {
                 role="menuitem"
                 onClick={() => {
                   setTasksMenu(false)
-                  setImportMessage('')
-                  setImportDialog(true)
+                  window.downloads.showListWindow('import', [], selectedQueue)
                 }}
               >
                 <FileInput size={15} /> Import download list…
@@ -509,8 +763,7 @@ function MainApp() {
                 role="menuitem"
                 onClick={() => {
                   setTasksMenu(false)
-                  setExportMessage('')
-                  setExportDialog(true)
+                  window.downloads.showListWindow('export', [...selectedIds], selectedQueue)
                 }}
               >
                 <FileOutput size={15} /> Export download list…
@@ -529,11 +782,7 @@ function MainApp() {
           icon={<Link2 />}
           label="Add URL"
           color="blue"
-          onClick={() => {
-            setFileSegments(segmentCount)
-            setPreview(undefined)
-            setDialog(true)
-          }}
+          onClick={() => window.downloads.showUtilityWindow('add', [], selectedQueue)}
         />
         <Tool
           icon={<CirclePlay />}
@@ -600,12 +849,17 @@ function MainApp() {
           }}
         />
         <span className="separator" />
-        <Tool icon={<Settings />} label="Options" color="blue" onClick={() => setOptions(true)} />
+        <Tool
+          icon={<Settings />}
+          label="Options"
+          color="blue"
+          onClick={() => window.downloads.showUtilityWindow('options')}
+        />
         <Tool
           icon={<CalendarClock />}
           label="Scheduler"
           color="orange"
-          onClick={() => setScheduler(true)}
+          onClick={() => window.downloads.showUtilityWindow('scheduler', [], selectedQueue)}
         />
         <Tool
           icon={<ListStart />}
@@ -628,8 +882,7 @@ function MainApp() {
           label="Import"
           color="blue"
           onClick={() => {
-            setImportMessage('')
-            setImportDialog(true)
+            window.downloads.showListWindow('import', [], selectedQueue)
           }}
         />
         <Tool
@@ -637,8 +890,7 @@ function MainApp() {
           label="Export"
           color="blue"
           onClick={() => {
-            setExportMessage('')
-            setExportDialog(true)
+            window.downloads.showListWindow('export', [...selectedIds], selectedQueue)
           }}
         />
         <Tool icon={<Globe2 />} label="Grabber" color="blue" />
@@ -870,7 +1122,10 @@ function MainApp() {
             className="danger"
             disabled={!selectedItems.some((item) => item.savePath)}
             onClick={() => {
-              setDeleteConfirm(selectedItems.filter((item) => item.savePath))
+              window.downloads.showUtilityWindow(
+                'delete',
+                selectedItems.filter((item) => item.savePath).map((item) => item.id),
+              )
               setContext(undefined)
             }}
           >
