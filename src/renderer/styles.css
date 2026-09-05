@@ -79,6 +79,28 @@ input {
   background: #e6f1fb;
   outline: 1px solid #b8d6f2;
 }
+.menu-root {
+  position: relative;
+  height: 23px;
+}
+.app-menu {
+  position: absolute;
+  z-index: 20;
+  top: 23px;
+  left: 0;
+  min-width: 205px;
+  padding: 3px;
+  background: #fff;
+  border: 1px solid #aaa;
+  box-shadow: 2px 3px 8px #0003;
+}
+.menubar .app-menu button {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
 .toolbar {
   height: 82px;
   display: flex;
@@ -233,25 +255,51 @@ input {
   background: #fff;
   overflow: hidden;
 }
+.table-scroll {
+  min-width: 0;
+  flex: 1;
+  overflow: auto;
+}
 .columns,
 .download-row {
   display: grid;
-  grid-template-columns: minmax(230px, 2.1fr) 90px 95px 80px 100px 145px minmax(130px, 1fr);
+  width: max-content;
+  min-width: 100%;
 }
 .columns {
   height: 25px;
-  flex: none;
+  position: sticky;
+  z-index: 2;
+  top: 0;
   background: linear-gradient(#fff, #e5e5e5);
   border-bottom: 1px solid #999;
 }
 .columns span {
+  position: relative;
   padding: 5px 6px;
   border-right: 1px solid #c5c5c5;
   font-weight: 500;
 }
 .rows {
-  overflow: auto;
-  flex: 1;
+  overflow: visible;
+}
+.column-resizer {
+  position: absolute;
+  z-index: 3;
+  top: 0;
+  right: -4px;
+  width: 8px;
+  height: 100%;
+  cursor: col-resize;
+  touch-action: none;
+}
+.column-resizer:hover,
+body.resizing-column .column-resizer {
+  border-right: 2px solid #2684c7;
+}
+body.resizing-column {
+  cursor: col-resize;
+  user-select: none;
 }
 .download-row {
   height: 25px;
@@ -321,6 +369,7 @@ input {
 }
 .dialog-shade {
   position: fixed;
+  z-index: 100;
   inset: 0;
   background: #0002;
   display: grid;
@@ -338,6 +387,17 @@ input {
   background: white;
   display: flex;
   justify-content: space-between;
+}
+.movable-dialog .dialog-title {
+  cursor: move;
+  touch-action: none;
+}
+.movable-dialog .dialog-title button {
+  cursor: default;
+}
+body.dragging-dialog {
+  cursor: move;
+  user-select: none;
 }
 .dialog-title button {
   border: 0;
@@ -428,10 +488,6 @@ legend {
   }
   .toolbar .tool:nth-last-child(-n + 2) {
     display: none;
-  }
-  .columns,
-  .download-row {
-    grid-template-columns: minmax(220px, 2fr) 80px 85px 70px 90px 130px minmax(90px, 1fr);
   }
 }
 .dialog-actions button {

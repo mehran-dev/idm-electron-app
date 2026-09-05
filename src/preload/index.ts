@@ -6,6 +6,8 @@ const api: DownloadApi = {
   inspect: (url) => ipcRenderer.invoke(IPC.inspect, url),
   chooseSavePath: (path) => ipcRenderer.invoke(IPC.chooseSavePath, path),
   showProgress: (id) => ipcRenderer.invoke(IPC.showProgress, id),
+  showListWindow: (mode, ids, queueId) =>
+    ipcRenderer.invoke(IPC.showListWindow, mode, ids, queueId),
   add: (url, queued = false, queueId, segments, path) =>
     queued
       ? ipcRenderer.invoke(IPC.enqueue, url, queueId, segments, path)

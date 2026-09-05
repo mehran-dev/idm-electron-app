@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Archive,
   CalendarClock,
@@ -54,9 +54,206 @@ const archives = ['zip', 'rar', '7z', 'tar', 'gz']
 const programs = ['exe', 'msi', 'dmg', 'deb', 'rpm', 'appimage']
 
 export function App() {
-  const id = new URLSearchParams(location.search).get('progress')
-  return id ? <ProgressWindow id={id} /> : <MainApp />
+  const params = new URLSearchParams(location.search)
+  const id = params.get('progress')
+  const listDialog = params.get('listDialog')
+  if (id) return <ProgressWindow id={id} />
+  if (listDialog === 'import' || listDialog === 'export')
+    return <ListDialogWindow mode={listDialog} params={params} />
+  return <MainApp />
 }
+
+function ListDialogWindow({
+  mode,
+  params,
+}: {
+  mode: 'import' | 'export'
+  params: URLSearchParams
+}) {
+  const [queues, setQueues] = useState<DownloadQueue[]>([])
+  const [items, setItems] = useState<DownloadItem[]>([])
+  const [queueId, setQueueId] = useState(params.get('queueId') ?? '')
+  const [newQueueName, setNewQueueName] = useState('')
+  const [exportMode, setExportMode] = useState<'selected' | 'queue'>('selected')
+  const [message, setMessage] = useState('')
+  const selectedIds = params.get('ids')?.split(',').filter(Boolean) ?? []
+  useEffect(() => {
+    window.downloads.listQueues().then((value) => {
+      setQueues(value)
+      if (!queueId && value[0]) setQueueId(value[0].id)
+    })
+    window.downloads.list().then(setItems)
+  }, [])
+  const createQueue = async () => {
+    if (!newQueueName.trim()) return
+    const queue = await window.downloads.createQueue(newQueueName, 1)
+    setQueues(await window.downloads.listQueues())
+    setQueueId(queue.id)
+    setNewQueueName('')
+    setMessage(`Queue “${queue.name}” created.`)
+  }
+  const runImport = async () => {
+    if (!queueId) return
+    const result = await window.downloads.importList(queueId)
+    if (!result.cancelled)
+      setMessage(`${result.fileName}: imported ${result.imported}, skipped ${result.skipped}.`)
+  }
+  const runExport = async () => {
+    const ids =
+      exportMode === 'selected'
+        ? selectedIds
+        : items.filter((item) => item.queueId === queueId).map((item) => item.id)
+    if (!ids.length) return setMessage('There are no downloads to export.')
+    const result = await window.downloads.exportList(ids)
+    if (!result.cancelled) setMessage(`${result.fileName}: exported ${result.exported} URL(s).`)
+  }
+  return (
+    <div className="native-list-dialog">
+      <div className="window-dialog import-dialog">
+        <div className="import-body">
+          {mode === 'import' ? <FileInput size={46} /> : <FileOutput size={46} />}
+          <p>
+            {mode === 'import'
+              ? 'Select a destination queue, then open a text file containing one HTTP/HTTPS download URL per line.'
+              : 'Export one download URL per line to a reusable text list.'}
+          </p>
+          {mode === 'import' ? (
+            <>
+              <fieldset>
+                <legend>Destination queue</legend>
+                <select value={queueId} onChange={(event) => setQueueId(event.target.value)}>
+                  {queues.map((queue) => (
+                    <option value={queue.id} key={queue.id}>
+                      {queue.name}
+                    </option>
+                  ))}
+                </select>
+              </fieldset>
+              <fieldset>
+                <legend>Create a new queue</legend>
+                <input
+                  value={newQueueName}
+                  onChange={(event) => setNewQueueName(event.target.value)}
+                  placeholder="New queue name"
+                />
+                <button disabled={!newQueueName.trim()} onClick={createQueue}>
+                  Create and select
+                </button>
+              </fieldset>
+            </>
+          ) : (
+            <fieldset>
+              <legend>What to export</legend>
+              <label>
+                <input
+                  type="radio"
+                  checked={exportMode === 'selected'}
+                  onChange={() => setExportMode('selected')}
+                />{' '}
+                Selected items ({selectedIds.length})
+              </label>
+              <label>
+                <input
+                  type="radio"
+                  checked={exportMode === 'queue'}
+                  onChange={() => setExportMode('queue')}
+                />{' '}
+                Entire queue
+              </label>
+              {exportMode === 'queue' && (
+                <select value={queueId} onChange={(event) => setQueueId(event.target.value)}>
+                  {queues.map((queue) => (
+                    <option value={queue.id} key={queue.id}>
+                      {queue.name}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </fieldset>
+          )}
+          {message && <div className="import-result">{message}</div>}
+        </div>
+        <div className="dialog-actions">
+          <button
+            className="primary"
+            disabled={mode === 'import' && !queueId}
+            onClick={mode === 'import' ? runImport : runExport}
+          >
+            {mode === 'import' ? 'Open .txt file' : 'Export...'}
+          </button>
+          <button onClick={() => window.close()}>Close</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function useDialogDrag() {
+  const [offset, setOffset] = useState({ x: 0, y: 0 })
+  const dialogRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const keepInsideParent = () => {
+      const dialog = dialogRef.current
+      const parent = dialog?.closest('.idm-app')
+      if (!dialog || !parent) return
+      const dialogRect = dialog.getBoundingClientRect()
+      const parentRect = parent.getBoundingClientRect()
+      setOffset((current) => ({
+        x:
+          current.x +
+          Math.max(
+            parentRect.left - dialogRect.left,
+            Math.min(0, parentRect.right - dialogRect.right),
+          ),
+        y:
+          current.y +
+          Math.max(
+            parentRect.top - dialogRect.top,
+            Math.min(0, parentRect.bottom - dialogRect.bottom),
+          ),
+      }))
+    }
+    window.addEventListener('resize', keepInsideParent)
+    return () => window.removeEventListener('resize', keepInsideParent)
+  }, [])
+  const startDrag = (event: React.PointerEvent<HTMLDivElement>) => {
+    if ((event.target as HTMLElement).closest('button')) return
+    event.preventDefault()
+    const dialog = event.currentTarget.closest('.window-dialog') as HTMLElement | null
+    if (!dialog) return
+    const startX = event.clientX
+    const startY = event.clientY
+    const startOffset = offset
+    const startRect = dialog.getBoundingClientRect()
+    const parentRect = dialog.closest('.idm-app')?.getBoundingClientRect()
+    if (!parentRect) return
+    const onMove = (moveEvent: PointerEvent) => {
+      const deltaX = Math.max(
+        parentRect.left - startRect.left,
+        Math.min(parentRect.right - startRect.right, moveEvent.clientX - startX),
+      )
+      const deltaY = Math.max(
+        parentRect.top - startRect.top,
+        Math.min(parentRect.bottom - startRect.bottom, moveEvent.clientY - startY),
+      )
+      setOffset({ x: startOffset.x + deltaX, y: startOffset.y + deltaY })
+    }
+    const onUp = () => {
+      document.removeEventListener('pointermove', onMove)
+      document.removeEventListener('pointerup', onUp)
+      document.body.classList.remove('dragging-dialog')
+    }
+    document.body.classList.add('dragging-dialog')
+    document.addEventListener('pointermove', onMove)
+    document.addEventListener('pointerup', onUp)
+  }
+  return {
+    ref: dialogRef,
+    style: { transform: `translate(${offset.x}px, ${offset.y}px)` },
+    onPointerDown: startDrag,
+  }
+}
+
 function ProgressWindow({ id }: { id: string }) {
   const [item, setItem] = useState<DownloadItem>()
   useEffect(() => {
@@ -111,6 +308,8 @@ function CompletedDownload({ item }: { item: DownloadItem }) {
   )
 }
 function MainApp() {
+  const importDrag = useDialogDrag()
+  const exportDrag = useDialogDrag()
   const [items, setItems] = useState<DownloadItem[]>([]),
     [queues, setQueues] = useState<DownloadQueue[]>([]),
     [category, setCategory] = useState<Category>('all'),
@@ -126,6 +325,7 @@ function MainApp() {
     [newQueueName, setNewQueueName] = useState(''),
     [importMessage, setImportMessage] = useState(''),
     [exportMessage, setExportMessage] = useState(''),
+    [tasksMenu, setTasksMenu] = useState(false),
     [deleteConfirm, setDeleteConfirm] = useState<DownloadItem[]>(),
     [segmentCount, setSegmentCount] = useState(4),
     [fileSegments, setFileSegments] = useState(4),
@@ -285,7 +485,39 @@ function MainApp() {
         </div>
       </div>
       <div className="menubar">
-        <button>Tasks</button>
+        <div className="menu-root">
+          <button
+            aria-haspopup="menu"
+            aria-expanded={tasksMenu}
+            onClick={() => setTasksMenu((open) => !open)}
+          >
+            Tasks
+          </button>
+          {tasksMenu && (
+            <div className="app-menu" role="menu">
+              <button
+                role="menuitem"
+                onClick={() => {
+                  setTasksMenu(false)
+                  setImportMessage('')
+                  setImportDialog(true)
+                }}
+              >
+                <FileInput size={15} /> Import download list…
+              </button>
+              <button
+                role="menuitem"
+                onClick={() => {
+                  setTasksMenu(false)
+                  setExportMessage('')
+                  setExportDialog(true)
+                }}
+              >
+                <FileOutput size={15} /> Export download list…
+              </button>
+            </div>
+          )}
+        </div>
         <button>File</button>
         <button>Downloads</button>
         <button>View</button>
@@ -411,7 +643,13 @@ function MainApp() {
         />
         <Tool icon={<Globe2 />} label="Grabber" color="blue" />
       </div>
-      <div className="workspace" onClick={() => setContext(undefined)}>
+      <div
+        className="workspace"
+        onClick={() => {
+          setContext(undefined)
+          setTasksMenu(false)
+        }}
+      >
         <CategoryTree
           value={category}
           onChange={(value) => {
@@ -680,8 +918,12 @@ function MainApp() {
       )}
       {importDialog && (
         <div className="dialog-shade">
-          <div className="window-dialog import-dialog">
-            <div className="dialog-title">
+          <div
+            ref={importDrag.ref}
+            className="window-dialog import-dialog movable-dialog"
+            style={importDrag.style}
+          >
+            <div className="dialog-title" onPointerDown={importDrag.onPointerDown}>
               Import download list from text file
               <button onClick={() => setImportDialog(false)}>×</button>
             </div>
@@ -729,8 +971,12 @@ function MainApp() {
       )}
       {exportDialog && (
         <div className="dialog-shade">
-          <div className="window-dialog import-dialog">
-            <div className="dialog-title">
+          <div
+            ref={exportDrag.ref}
+            className="window-dialog import-dialog movable-dialog"
+            style={exportDrag.style}
+          >
+            <div className="dialog-title" onPointerDown={exportDrag.onPointerDown}>
               Export download URLs<button onClick={() => setExportDialog(false)}>×</button>
             </div>
             <div className="import-body">
@@ -1447,6 +1693,29 @@ function DownloadTable({
     key: 'date',
     direction: 'desc',
   })
+  const [columnWidths, setColumnWidths] = useState([300, 90, 95, 80, 110, 155, 180])
+  const gridColumns = columnWidths.map((width) => `${width}px`).join(' ')
+  const resizeColumn = (event: React.PointerEvent, index: number) => {
+    event.preventDefault()
+    event.stopPropagation()
+    const startX = event.clientX
+    const startWidth = columnWidths[index] ?? 80
+    const onMove = (moveEvent: PointerEvent) => {
+      setColumnWidths((current) => {
+        const next = [...current]
+        next[index] = Math.max(55, startWidth + moveEvent.clientX - startX)
+        return next
+      })
+    }
+    const onUp = () => {
+      document.removeEventListener('pointermove', onMove)
+      document.removeEventListener('pointerup', onUp)
+      document.body.classList.remove('resizing-column')
+    }
+    document.body.classList.add('resizing-column')
+    document.addEventListener('pointermove', onMove)
+    document.addEventListener('pointerup', onUp)
+  }
   const sortedItems = useMemo(() => {
     const value = (item: DownloadItem, key: SortKey): string | number => {
       if (key === 'fileName') return item.fileName.toLocaleLowerCase()
@@ -1475,7 +1744,7 @@ function DownloadTable({
       key,
       direction: current.key === key && current.direction === 'asc' ? 'desc' : 'asc',
     }))
-  const header = (key: SortKey, label: string) => (
+  const header = (key: SortKey, label: string, index: number) => (
     <span
       aria-sort={
         sort.key === key ? (sort.direction === 'asc' ? 'ascending' : 'descending') : 'none'
@@ -1485,46 +1754,56 @@ function DownloadTable({
         {label}
         <i>{sort.key === key ? (sort.direction === 'asc' ? '▲' : '▼') : ''}</i>
       </button>
+      <i
+        className="column-resizer"
+        role="separator"
+        aria-label={`Resize ${label} column`}
+        aria-orientation="vertical"
+        onPointerDown={(event) => resizeColumn(event, index)}
+      />
     </span>
   )
   return (
     <section className="downloads-table">
-      <div className="columns">
-        {header('fileName', 'File Name')}
-        {header('size', 'Size')}
-        {header('status', 'Status')}
-        {header('timeLeft', 'Time left')}
-        {header('speed', 'Transfer rate')}
-        {header('date', 'Last Try Date')}
-        {header('description', 'Description')}
-      </div>
-      <div className="rows">
-        {items.length === 0 ? (
-          <div className="no-downloads">There are no files in this category.</div>
-        ) : (
-          sortedItems.map((item) => (
-            <div
-              className={`download-row ${selected.has(item.id) ? 'selected' : ''}`}
-              onClick={(event) => onSelect(event, item.id)}
-              onContextMenu={(event) => onContext(event, item)}
-              onDoubleClick={() => onOpen(item.id)}
-              key={item.id}
-            >
-              <span className="name">
-                <FileIcon name={item.fileName} />
-                <b>{item.fileName}</b>
-              </span>
-              <span>{formatBytes(item.totalBytes)}</span>
-              <span>{status(item)}</span>
-              <span>{timeLeft(item)}</span>
-              <span>{item.speed ? `${formatBytes(item.speed)}/sec` : ''}</span>
-              <span>{new Date(item.createdAt).toLocaleString()}</span>
-              <span title={item.error}>
-                {item.error ?? `${item.segmentCount ?? 1} connection(s)`}
-              </span>
-            </div>
-          ))
-        )}
+      <div className="table-scroll">
+        <div className="columns" style={{ gridTemplateColumns: gridColumns }}>
+          {header('fileName', 'File Name', 0)}
+          {header('size', 'Size', 1)}
+          {header('status', 'Status', 2)}
+          {header('timeLeft', 'Time left', 3)}
+          {header('speed', 'Transfer rate', 4)}
+          {header('date', 'Last Try Date', 5)}
+          {header('description', 'Description', 6)}
+        </div>
+        <div className="rows">
+          {items.length === 0 ? (
+            <div className="no-downloads">There are no files in this category.</div>
+          ) : (
+            sortedItems.map((item) => (
+              <div
+                className={`download-row ${selected.has(item.id) ? 'selected' : ''}`}
+                onClick={(event) => onSelect(event, item.id)}
+                onContextMenu={(event) => onContext(event, item)}
+                onDoubleClick={() => onOpen(item.id)}
+                key={item.id}
+                style={{ gridTemplateColumns: gridColumns }}
+              >
+                <span className="name">
+                  <FileIcon name={item.fileName} />
+                  <b>{item.fileName}</b>
+                </span>
+                <span>{formatBytes(item.totalBytes)}</span>
+                <span>{status(item)}</span>
+                <span>{timeLeft(item)}</span>
+                <span>{item.speed ? `${formatBytes(item.speed)}/sec` : ''}</span>
+                <span>{new Date(item.createdAt).toLocaleString()}</span>
+                <span title={item.error}>
+                  {item.error ?? `${item.segmentCount ?? 1} connection(s)`}
+                </span>
+              </div>
+            ))
+          )}
+        </div>
       </div>
     </section>
   )

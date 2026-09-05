@@ -109,6 +109,34 @@ export function registerDownloadDialogHandlers(
     return result.canceled ? undefined : result.filePath
   })
   ipcMain.handle(IPC.showProgress, (_e, id: string) => showProgress(id))
+  ipcMain.handle(
+    IPC.showListWindow,
+    (_event, mode: 'import' | 'export', ids: string[], queueId?: string) => {
+      const query = {
+        listDialog: mode,
+        ids: ids.join(','),
+        queueId: queueId ?? '',
+      }
+      const child = new BrowserWindow({
+        width: 570,
+        height: mode === 'import' ? 455 : 390,
+        minWidth: 520,
+        minHeight: 340,
+        title: mode === 'import' ? 'Import download list' : 'Export download list',
+        autoHideMenuBar: true,
+        webPreferences: {
+          preload: join(__dirname, '../preload/index.cjs'),
+          contextIsolation: true,
+          nodeIntegration: false,
+          sandbox: true,
+        },
+      })
+      if (process.env.ELECTRON_RENDERER_URL) {
+        const params = new URLSearchParams(query)
+        child.loadURL(`${process.env.ELECTRON_RENDERER_URL}?${params}`)
+      } else child.loadFile(join(__dirname, '../renderer/index.html'), { query })
+    },
+  )
   ipcMain.removeHandler(IPC.startNow)
   ipcMain.handle(IPC.startNow, (_e, url: string, segments?: number, path?: string) =>
     service.add(url, segments, path),
