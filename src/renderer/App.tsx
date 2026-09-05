@@ -138,6 +138,9 @@ function DeleteFilesWindow({ ids }: { ids: string[] }) {
   return (
     <div className="native-dialog-host native-confirm">
       <div className="window-dialog confirm-dialog">
+        <div className="dialog-title">
+          Confirm file deletion<button onClick={() => window.close()}>×</button>
+        </div>
         <div className="confirm-body">
           <Trash2 />
           <div>
@@ -238,6 +241,9 @@ function AddDownloadWindow({
   return (
     <div className="native-dialog-host">
       <div className="dialog file-info-dialog">
+        <div className="dialog-title">
+          Enter new address to download<button onClick={() => window.close()}>×</button>
+        </div>
         <div className="dialog-body">
           <div className="url-row">
             <Globe2 size={42} />
@@ -357,6 +363,10 @@ function ListDialogWindow({
   return (
     <div className="native-list-dialog">
       <div className="window-dialog import-dialog">
+        <div className="dialog-title">
+          {mode === 'import' ? 'Import download list' : 'Export download list'}
+          <button onClick={() => window.close()}>×</button>
+        </div>
         <div className="import-body">
           {mode === 'import' ? <FileInput size={46} /> : <FileOutput size={46} />}
           <p>

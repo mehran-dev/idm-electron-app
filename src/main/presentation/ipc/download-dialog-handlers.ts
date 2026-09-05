@@ -123,6 +123,7 @@ export function registerDownloadDialogHandlers(
         minWidth: 520,
         minHeight: 340,
         title: mode === 'import' ? 'Import download list' : 'Export download list',
+        frame: false,
         autoHideMenuBar: true,
         webPreferences: {
           preload: join(__dirname, '../preload/index.cjs'),
@@ -159,6 +160,7 @@ export function registerDownloadDialogHandlers(
         minWidth: Math.min(width, 500),
         minHeight: Math.min(height, 280),
         title: titles[mode],
+        frame: false,
         autoHideMenuBar: true,
         webPreferences: {
           preload: join(__dirname, '../preload/index.cjs'),
@@ -199,6 +201,7 @@ export function progressWindow(id: string) {
     minWidth: 560,
     minHeight: 480,
     title: 'Download status',
+    frame: false,
     autoHideMenuBar: true,
     webPreferences: {
       preload: join(__dirname, '../preload/index.cjs'),
