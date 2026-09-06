@@ -12,6 +12,15 @@ const api: DownloadApi = {
     ipcRenderer.invoke(IPC.showUtilityWindow, mode, ids, queueId),
   downloadSocial: (platform, url, allowInvalidCertificate) =>
     ipcRenderer.invoke(IPC.downloadSocial, platform, url, allowInvalidCertificate),
+  onSocialProgress: (listener) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      value: { percent: number; status: string },
+    ) => listener(value)
+    ipcRenderer.on(IPC.socialProgress, handler)
+    return () => ipcRenderer.removeListener(IPC.socialProgress, handler)
+  },
+  getSocialProgress: () => ipcRenderer.invoke(IPC.getSocialProgress),
   add: (url, queued = false, queueId, segments, path) =>
     queued
       ? ipcRenderer.invoke(IPC.enqueue, url, queueId, segments, path)

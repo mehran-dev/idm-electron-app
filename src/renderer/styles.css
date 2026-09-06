@@ -849,6 +849,23 @@ legend {
 .social-status {
   grid-column: 1 / -1;
 }
+.social-progress {
+  grid-column: 1 / -1;
+  margin-top: 8px;
+}
+.social-progress > div {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 5px;
+}
+.social-progress progress {
+  width: 100%;
+  height: 14px;
+  accent-color: #1673cf;
+}
+.social-window.youtube .social-progress progress {
+  accent-color: #e62117;
+}
 .social-body > input {
   height: 31px;
   padding: 5px 8px;

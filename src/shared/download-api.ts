@@ -14,6 +14,8 @@ export const IPC = {
   showListWindow: 'downloads:show-list-window',
   showUtilityWindow: 'downloads:show-utility-window',
   downloadSocial: 'downloads:download-social',
+  socialProgress: 'downloads:social-progress',
+  getSocialProgress: 'downloads:get-social-progress',
   add: 'downloads:add',
   startNow: 'downloads:start-now',
   enqueue: 'downloads:enqueue',
@@ -61,6 +63,8 @@ export interface DownloadApi {
     url: string,
     allowInvalidCertificate?: boolean,
   ): Promise<{ ok: true; filePath: string } | { ok: false; error: string }>
+  onSocialProgress(listener: (value: { percent: number; status: string }) => void): () => void
+  getSocialProgress(): Promise<{ percent: number; status: string }>
   add(
     url: string,
     queued?: boolean,

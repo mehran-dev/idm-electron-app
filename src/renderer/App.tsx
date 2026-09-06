@@ -140,10 +140,28 @@ function SocialDownloadWindow({ platform }: { platform: 'youtube' | 'instagram' 
   const [statusMessage, setStatusMessage] = useState('')
   const [downloading, setDownloading] = useState(false)
   const [allowInvalidCertificate, setAllowInvalidCertificate] = useState(false)
+  const [progress, setProgress] = useState({ percent: 0, status: '' })
   const label = platform === 'youtube' ? 'YouTube' : 'Instagram'
   const Icon = platform === 'youtube' ? Youtube : Instagram
+  useEffect(() => window.downloads.onSocialProgress(setProgress), [])
+  useEffect(() => {
+    if (!downloading) return
+    let active = true
+    const refresh = () =>
+      window.downloads
+        .getSocialProgress()
+        .then((value) => active && setProgress(value))
+        .catch(() => undefined)
+    refresh()
+    const timer = window.setInterval(refresh, 250)
+    return () => {
+      active = false
+      window.clearInterval(timer)
+    }
+  }, [downloading])
   const download = async () => {
     setDownloading(true)
+    setProgress({ percent: 2, status: 'Connecting…' })
     setStatusMessage('Resolving available media and downloading…')
     try {
       const result = await window.downloads.downloadSocial(
@@ -194,7 +212,20 @@ function SocialDownloadWindow({ platform }: { platform: 'youtube' | 'instagram' 
             Allow untrusted certificates (less secure; use only if normal downloads report a
             certificate error)
           </label>
-          {statusMessage && <div className="social-status">{statusMessage}</div>}
+          {!downloading && statusMessage && <div className="social-status">{statusMessage}</div>}
+          {downloading && (
+            <div className="social-progress">
+              <div>
+                <span>{progress.status}</span>
+                <b>{progress.percent > 0 ? `${progress.percent.toFixed(0)}%` : 'Please wait'}</b>
+              </div>
+              {progress.percent > 0 ? (
+                <progress max="100" value={progress.percent} />
+              ) : (
+                <progress />
+              )}
+            </div>
+          )}
         </div>
         <div className="dialog-actions">
           <button className="primary" disabled={!url.trim() || downloading} onClick={download}>

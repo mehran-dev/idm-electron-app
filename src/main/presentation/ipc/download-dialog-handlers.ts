@@ -4,6 +4,7 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from
 import { spawn } from 'node:child_process'
 import { IPC, type DownloadPreview } from '../../../shared/download'
 import type { DownloadService } from '../../application/download-service'
+const socialProgressByWebContents = new Map<number, { percent: number; status: string }>()
 const category = (name: string, mime: string) =>
   mime.startsWith('video/')
     ? 'Video'
@@ -78,6 +79,11 @@ export function registerDownloadDialogHandlers(
   service: DownloadService,
   showProgress: (id: string) => void,
 ) {
+  ipcMain.handle(IPC.getSocialProgress, (event) =>
+    Promise.resolve(
+      socialProgressByWebContents.get(event.sender.id) ?? { percent: 0, status: 'Waiting…' },
+    ),
+  )
   ipcMain.handle(IPC.getCompletionSound, () => savedSound())
   ipcMain.handle(IPC.chooseCompletionSound, async () => {
     const selected = await dialog.showOpenDialog({
@@ -188,7 +194,7 @@ export function registerDownloadDialogHandlers(
   ipcMain.handle(
     IPC.downloadSocial,
     async (
-      _event,
+      event,
       platform: 'youtube' | 'instagram',
       urlValue: string,
       allowInvalidCertificate = false,
@@ -209,6 +215,12 @@ export function registerDownloadDialogHandlers(
           error: `Enter a valid ${platform === 'youtube' ? 'YouTube' : 'Instagram'} URL.`,
         }
       const destination = join(app.getPath('downloads'), platform)
+      console.info('[social-download] request', { platform, senderId: event.sender.id })
+      socialProgressByWebContents.set(event.sender.id, {
+        percent: 2,
+        status: `Connecting to ${platform === 'youtube' ? 'YouTube' : 'Instagram'}…`,
+      })
+      event.sender.once('destroyed', () => socialProgressByWebContents.delete(event.sender.id))
       mkdirSync(destination, { recursive: true })
       const executableName = process.platform === 'win32' ? 'yt-dlp.exe' : 'yt-dlp'
       const executable =
@@ -226,20 +238,48 @@ export function registerDownloadDialogHandlers(
         (resolve) => {
           const output: string[] = []
           let failedToStart = false
+          let progressBuffer = ''
+          let finalPath = ''
+          let reportedPercent = 2
+          const reportProgress = (percent: number, status: string) => {
+            if (event.sender.isDestroyed()) return
+            reportedPercent = Math.max(reportedPercent, percent)
+            socialProgressByWebContents.set(event.sender.id, {
+              percent: Math.min(100, reportedPercent),
+              status,
+            })
+            console.info('[social-download] progress', {
+              senderId: event.sender.id,
+              percent: Math.min(100, reportedPercent),
+              status,
+            })
+            event.sender.send(IPC.socialProgress, {
+              percent: Math.min(100, reportedPercent),
+              status,
+            })
+          }
+          reportProgress(2, `Connecting to ${platform === 'youtube' ? 'YouTube' : 'Instagram'}…`)
           const args = [
             '--no-playlist',
             '--compat-options',
             'no-certifi',
             '--js-runtimes',
             'node',
+            '--no-colors',
             '--newline',
-            '--no-progress',
+            '--progress',
+            '--progress-delta',
+            '0.2',
+            '--progress-template',
+            'download:PROGRESS:%(progress.downloaded_bytes)s:%(progress.total_bytes,progress.total_bytes_estimate)s:%(progress._percent_str)s',
             '--retries',
-            '10',
+            '3',
             '--extractor-retries',
-            '5',
+            '3',
             '--fragment-retries',
-            '10',
+            '3',
+            '--concurrent-fragments',
+            '4',
             '-f',
             'bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best',
             '--merge-output-format',
@@ -249,15 +289,52 @@ export function registerDownloadDialogHandlers(
             '-o',
             '%(title)s [%(id)s].%(ext)s',
             '--print',
-            'after_move:filepath',
+            'after_move:FINAL_PATH:%(filepath)s',
+            '--no-quiet',
             url.href,
           ]
           if (ffmpegDirectory) args.unshift('--ffmpeg-location', ffmpegDirectory)
           if (allowInvalidCertificate) args.unshift('--no-check-certificates')
-          const process = spawn(executable, args, { stdio: ['ignore', 'pipe', 'pipe'] })
-          process.stdout.on('data', (chunk) => output.push(String(chunk)))
-          process.stderr.on('data', (chunk) => output.push(String(chunk)))
-          process.once('error', (error) => {
+          const downloaderProcess = spawn(executable, args, {
+            stdio: ['ignore', 'pipe', 'pipe'],
+            env: { ...process.env, PYTHONUNBUFFERED: '1' },
+          })
+          console.info('[social-download] spawned', {
+            senderId: event.sender.id,
+            pid: downloaderProcess.pid,
+            executable,
+          })
+          const consumeOutput = (chunk: unknown) => {
+            const text = String(chunk)
+            output.push(text)
+            console.debug('[social-download] output', text.trim().slice(0, 500))
+            if (/Extracting URL/i.test(text)) reportProgress(5, 'Checking media address…')
+            if (/Downloading webpage/i.test(text)) reportProgress(10, 'Loading video page…')
+            if (/Downloading .*API JSON/i.test(text))
+              reportProgress(18, 'Reading video information…')
+            if (/Solving JS challenges/i.test(text)) reportProgress(26, 'Resolving YouTube media…')
+            if (/Downloading \d+ format/i.test(text)) reportProgress(30, 'Starting media transfer…')
+            const pathMatch = text.match(/FINAL_PATH:([^\r\n]+)/)
+            if (pathMatch?.[1]) finalPath = pathMatch[1].trim()
+            progressBuffer += text
+            const progressPattern = /PROGRESS:(\d+):([^:\r\n]+):\s*([\d.]+)%/g
+            let match: RegExpExecArray | null
+            let consumed = 0
+            while ((match = progressPattern.exec(progressBuffer))) {
+              consumed = progressPattern.lastIndex
+              reportProgress(30 + Number(match[3]) * 0.65, 'Downloading media…')
+            }
+            if (
+              /Merging formats|Fixing MPEG-TS/i.test(progressBuffer) &&
+              !event.sender.isDestroyed()
+            )
+              reportProgress(97, 'Merging video and audio…')
+            progressBuffer = consumed ? progressBuffer.slice(consumed) : progressBuffer.slice(-256)
+          }
+          downloaderProcess.stdout.on('data', consumeOutput)
+          downloaderProcess.stderr.on('data', consumeOutput)
+          downloaderProcess.once('error', (error) => {
+            console.error('[social-download] process error', error)
             failedToStart = true
             resolve({
               ok: false,
@@ -266,11 +343,18 @@ export function registerDownloadDialogHandlers(
                 : error.message,
             })
           })
-          process.once('close', (code) => {
+          downloaderProcess.once('close', (code) => {
+            console.info('[social-download] process closed', {
+              senderId: event.sender.id,
+              code,
+              finalPath,
+            })
             if (failedToStart) return
             const lines = output.join('').trim().split(/\r?\n/).filter(Boolean)
-            if (code === 0) resolve({ ok: true, filePath: lines.at(-1) ?? destination })
-            else
+            if (code === 0) {
+              reportProgress(100, 'Download complete')
+              resolve({ ok: true, filePath: finalPath || destination })
+            } else
               resolve({
                 ok: false,
                 error: lines.slice(-3).join('\n') || `yt-dlp exited with code ${code}`,
