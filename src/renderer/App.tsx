@@ -186,6 +186,16 @@ function AddDownloadWindow({
   const [inspecting, setInspecting] = useState(false)
   const [segments, setSegments] = useState(segmentCount)
   const [queueId, setQueueId] = useState(initialQueue)
+  const dialogElement = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const dialog = dialogElement.current
+    if (!dialog) return
+    const fitWindowToContent = () => window.resizeTo(620, Math.max(170, dialog.scrollHeight))
+    const observer = new ResizeObserver(fitWindowToContent)
+    observer.observe(dialog)
+    fitWindowToContent()
+    return () => observer.disconnect()
+  }, [])
   useEffect(() => {
     if (!queueId && queues[0]) setQueueId(queues[0].id)
   }, [queues, queueId])
@@ -240,7 +250,7 @@ function AddDownloadWindow({
   }
   return (
     <div className="native-dialog-host">
-      <div className="dialog file-info-dialog">
+      <div ref={dialogElement} className="dialog file-info-dialog">
         <div className="dialog-title">
           Enter new address to download<button onClick={() => window.close()}>×</button>
         </div>
@@ -249,7 +259,14 @@ function AddDownloadWindow({
             <Globe2 size={42} />
             <div>
               <label>Address</label>
-              <input autoFocus value={url} onChange={(event) => setUrl(event.target.value)} />
+              <input
+                autoFocus
+                value={url}
+                onChange={(event) => {
+                  setUrl(event.target.value)
+                  setPreview(undefined)
+                }}
+              />
             </div>
           </div>
           {inspecting && !preview && <p className="query-status">Getting file information…</p>}
