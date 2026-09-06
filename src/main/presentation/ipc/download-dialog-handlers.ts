@@ -148,7 +148,7 @@ export function registerDownloadDialogHandlers(
       queueId?: string,
     ) => {
       const sizes = {
-        add: [620, 590],
+        add: [620, 180],
         scheduler: [680, 570],
         options: [760, 620],
         delete: [540, 300],

@@ -810,6 +810,10 @@ legend {
   display: flex;
   flex-direction: column;
 }
+.native-dialog-host > .file-info-dialog {
+  height: auto;
+  min-height: 0;
+}
 .native-dialog-host > .dialog > .dialog-body,
 .native-list-dialog > .window-dialog > .import-body,
 .native-confirm > .window-dialog > .confirm-body {
