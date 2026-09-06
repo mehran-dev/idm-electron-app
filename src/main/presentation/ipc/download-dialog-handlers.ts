@@ -1,10 +1,11 @@
-import { app, BrowserWindow, dialog, ipcMain, net, session } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, net, session, shell } from 'electron'
 import { basename, join } from 'node:path'
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { spawn } from 'node:child_process'
 import { IPC, type DownloadPreview } from '../../../shared/download'
 import type { DownloadService } from '../../application/download-service'
 const socialProgressByWebContents = new Map<number, { percent: number; status: string }>()
+const socialFilesByWebContents = new Map<number, string>()
 const category = (name: string, mime: string) =>
   mime.startsWith('video/')
     ? 'Video'
@@ -79,6 +80,14 @@ export function registerDownloadDialogHandlers(
   service: DownloadService,
   showProgress: (id: string) => void,
 ) {
+  ipcMain.handle(IPC.openSocialFile, async (event) => {
+    const path = socialFilesByWebContents.get(event.sender.id)
+    return path ? shell.openPath(path) : 'No completed download is available.'
+  })
+  ipcMain.handle(IPC.showSocialFileInFolder, (event) => {
+    const path = socialFilesByWebContents.get(event.sender.id)
+    if (path) shell.showItemInFolder(path)
+  })
   ipcMain.handle(IPC.getSocialProgress, (event) =>
     Promise.resolve(
       socialProgressByWebContents.get(event.sender.id) ?? { percent: 0, status: 'Waiting…' },
@@ -217,10 +226,14 @@ export function registerDownloadDialogHandlers(
       const destination = join(app.getPath('downloads'), platform)
       console.info('[social-download] request', { platform, senderId: event.sender.id })
       socialProgressByWebContents.set(event.sender.id, {
-        percent: 2,
+        percent: 0,
         status: `Connecting to ${platform === 'youtube' ? 'YouTube' : 'Instagram'}…`,
       })
-      event.sender.once('destroyed', () => socialProgressByWebContents.delete(event.sender.id))
+      socialFilesByWebContents.delete(event.sender.id)
+      event.sender.once('destroyed', () => {
+        socialProgressByWebContents.delete(event.sender.id)
+        socialFilesByWebContents.delete(event.sender.id)
+      })
       mkdirSync(destination, { recursive: true })
       const executableName = process.platform === 'win32' ? 'yt-dlp.exe' : 'yt-dlp'
       const executable =
@@ -240,25 +253,23 @@ export function registerDownloadDialogHandlers(
           let failedToStart = false
           let progressBuffer = ''
           let finalPath = ''
-          let reportedPercent = 2
           const reportProgress = (percent: number, status: string) => {
             if (event.sender.isDestroyed()) return
-            reportedPercent = Math.max(reportedPercent, percent)
             socialProgressByWebContents.set(event.sender.id, {
-              percent: Math.min(100, reportedPercent),
+              percent: Math.max(0, Math.min(100, percent)),
               status,
             })
             console.info('[social-download] progress', {
               senderId: event.sender.id,
-              percent: Math.min(100, reportedPercent),
+              percent: Math.max(0, Math.min(100, percent)),
               status,
             })
             event.sender.send(IPC.socialProgress, {
-              percent: Math.min(100, reportedPercent),
+              percent: Math.max(0, Math.min(100, percent)),
               status,
             })
           }
-          reportProgress(2, `Connecting to ${platform === 'youtube' ? 'YouTube' : 'Instagram'}…`)
+          reportProgress(0, `Connecting to ${platform === 'youtube' ? 'YouTube' : 'Instagram'}…`)
           const args = [
             '--no-playlist',
             '--compat-options',
@@ -308,12 +319,12 @@ export function registerDownloadDialogHandlers(
             const text = String(chunk)
             output.push(text)
             console.debug('[social-download] output', text.trim().slice(0, 500))
-            if (/Extracting URL/i.test(text)) reportProgress(5, 'Checking media address…')
-            if (/Downloading webpage/i.test(text)) reportProgress(10, 'Loading video page…')
+            if (/Extracting URL/i.test(text)) reportProgress(0, 'Checking media address…')
+            if (/Downloading webpage/i.test(text)) reportProgress(0, 'Loading video page…')
             if (/Downloading .*API JSON/i.test(text))
-              reportProgress(18, 'Reading video information…')
-            if (/Solving JS challenges/i.test(text)) reportProgress(26, 'Resolving YouTube media…')
-            if (/Downloading \d+ format/i.test(text)) reportProgress(30, 'Starting media transfer…')
+              reportProgress(0, 'Reading video information…')
+            if (/Solving JS challenges/i.test(text)) reportProgress(0, 'Resolving YouTube media…')
+            if (/Downloading \d+ format/i.test(text)) reportProgress(0, 'Starting media transfer…')
             const pathMatch = text.match(/FINAL_PATH:([^\r\n]+)/)
             if (pathMatch?.[1]) finalPath = pathMatch[1].trim()
             progressBuffer += text
@@ -322,13 +333,13 @@ export function registerDownloadDialogHandlers(
             let consumed = 0
             while ((match = progressPattern.exec(progressBuffer))) {
               consumed = progressPattern.lastIndex
-              reportProgress(30 + Number(match[3]) * 0.65, 'Downloading media…')
+              reportProgress(Number(match[3]), 'Downloading media (current stream)…')
             }
             if (
               /Merging formats|Fixing MPEG-TS/i.test(progressBuffer) &&
               !event.sender.isDestroyed()
             )
-              reportProgress(97, 'Merging video and audio…')
+              reportProgress(0, 'Merging video and audio…')
             progressBuffer = consumed ? progressBuffer.slice(consumed) : progressBuffer.slice(-256)
           }
           downloaderProcess.stdout.on('data', consumeOutput)
@@ -352,6 +363,8 @@ export function registerDownloadDialogHandlers(
             if (failedToStart) return
             const lines = output.join('').trim().split(/\r?\n/).filter(Boolean)
             if (code === 0) {
+              if (!event.sender.isDestroyed())
+                socialFilesByWebContents.set(event.sender.id, finalPath || destination)
               reportProgress(100, 'Download complete')
               resolve({ ok: true, filePath: finalPath || destination })
             } else

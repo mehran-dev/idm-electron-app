@@ -12,6 +12,8 @@ const api: DownloadApi = {
     ipcRenderer.invoke(IPC.showUtilityWindow, mode, ids, queueId),
   downloadSocial: (platform, url, allowInvalidCertificate) =>
     ipcRenderer.invoke(IPC.downloadSocial, platform, url, allowInvalidCertificate),
+  openSocialFile: () => ipcRenderer.invoke(IPC.openSocialFile),
+  showSocialFileInFolder: () => ipcRenderer.invoke(IPC.showSocialFileInFolder),
   onSocialProgress: (listener) => {
     const handler = (
       _event: Electron.IpcRendererEvent,

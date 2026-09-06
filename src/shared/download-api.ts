@@ -14,6 +14,8 @@ export const IPC = {
   showListWindow: 'downloads:show-list-window',
   showUtilityWindow: 'downloads:show-utility-window',
   downloadSocial: 'downloads:download-social',
+  openSocialFile: 'downloads:open-social-file',
+  showSocialFileInFolder: 'downloads:show-social-file-in-folder',
   socialProgress: 'downloads:social-progress',
   getSocialProgress: 'downloads:get-social-progress',
   add: 'downloads:add',
@@ -63,6 +65,8 @@ export interface DownloadApi {
     url: string,
     allowInvalidCertificate?: boolean,
   ): Promise<{ ok: true; filePath: string } | { ok: false; error: string }>
+  openSocialFile(): Promise<string>
+  showSocialFileInFolder(): Promise<void>
   onSocialProgress(listener: (value: { percent: number; status: string }) => void): () => void
   getSocialProgress(): Promise<{ percent: number; status: string }>
   add(

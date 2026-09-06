@@ -137,6 +137,7 @@ function UtilityDialogWindow({
 
 function SocialDownloadWindow({ platform }: { platform: 'youtube' | 'instagram' }) {
   const [url, setUrl] = useState('')
+  const [completed, setCompleted] = useState(false)
   const [statusMessage, setStatusMessage] = useState('')
   const [downloading, setDownloading] = useState(false)
   const [allowInvalidCertificate, setAllowInvalidCertificate] = useState(false)
@@ -160,8 +161,9 @@ function SocialDownloadWindow({ platform }: { platform: 'youtube' | 'instagram' 
     }
   }, [downloading])
   const download = async () => {
+    setCompleted(false)
     setDownloading(true)
-    setProgress({ percent: 2, status: 'Connecting…' })
+    setProgress({ percent: 0, status: 'Connecting…' })
     setStatusMessage('Resolving available media and downloading…')
     try {
       const result = await window.downloads.downloadSocial(
@@ -169,6 +171,7 @@ function SocialDownloadWindow({ platform }: { platform: 'youtube' | 'instagram' 
         url.trim(),
         allowInvalidCertificate,
       )
+      setCompleted(result.ok)
       setStatusMessage(result.ok ? `Saved to ${result.filePath}` : result.error)
     } catch (reason) {
       setStatusMessage(
@@ -197,7 +200,12 @@ function SocialDownloadWindow({ platform }: { platform: 'youtube' | 'instagram' 
             autoFocus
             placeholder={`https://${platform === 'youtube' ? 'youtube.com/watch?v=…' : 'instagram.com/reel/…'}`}
             value={url}
-            onChange={(event) => setUrl(event.target.value)}
+            disabled={downloading}
+            onChange={(event) => {
+              setUrl(event.target.value)
+              setCompleted(false)
+              setStatusMessage('')
+            }}
           />
           <small>
             Download only media you own or have permission to save. Private, paid, and DRM-protected
@@ -228,9 +236,30 @@ function SocialDownloadWindow({ platform }: { platform: 'youtube' | 'instagram' 
           )}
         </div>
         <div className="dialog-actions">
-          <button className="primary" disabled={!url.trim() || downloading} onClick={download}>
-            {downloading ? 'Downloading…' : 'Download'}
-          </button>
+          {completed ? (
+            <>
+              <button
+                className="primary"
+                onClick={async () => {
+                  try {
+                    const error = await window.downloads.openSocialFile()
+                    if (error) setStatusMessage(error)
+                  } catch (reason) {
+                    setStatusMessage(
+                      reason instanceof Error ? reason.message : 'Unable to open file.',
+                    )
+                  }
+                }}
+              >
+                Open
+              </button>
+              <button onClick={() => window.downloads.showSocialFileInFolder()}>Open Folder</button>
+            </>
+          ) : (
+            <button className="primary" disabled={!url.trim() || downloading} onClick={download}>
+              {downloading ? 'Downloading…' : 'Download'}
+            </button>
+          )}
           <button onClick={() => window.close()}>Close</button>
         </div>
       </div>
