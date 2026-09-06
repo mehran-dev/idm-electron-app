@@ -1,6 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, net, session } from 'electron'
 import { basename, join } from 'node:path'
-import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { spawn } from 'node:child_process'
 import { IPC, type DownloadPreview } from '../../../shared/download'
 import type { DownloadService } from '../../application/download-service'
 const category = (name: string, mime: string) =>
@@ -140,18 +141,27 @@ export function registerDownloadDialogHandlers(
   )
   ipcMain.handle(
     IPC.showUtilityWindow,
-    (_event, mode: 'add' | 'scheduler' | 'options' | 'delete', ids: string[], queueId?: string) => {
+    (
+      _event,
+      mode: 'add' | 'scheduler' | 'options' | 'delete' | 'youtube' | 'instagram',
+      ids: string[],
+      queueId?: string,
+    ) => {
       const sizes = {
         add: [620, 590],
         scheduler: [680, 570],
         options: [760, 620],
         delete: [540, 300],
+        youtube: [570, 390],
+        instagram: [570, 390],
       } as const
       const titles = {
         add: 'Add download',
         scheduler: 'Scheduler',
         options: 'Options',
         delete: 'Confirm file deletion',
+        youtube: 'Download from YouTube',
+        instagram: 'Download from Instagram',
       }
       const [width, height] = sizes[mode]
       const child = new BrowserWindow({
@@ -173,6 +183,101 @@ export function registerDownloadDialogHandlers(
       if (process.env.ELECTRON_RENDERER_URL) {
         child.loadURL(`${process.env.ELECTRON_RENDERER_URL}?${new URLSearchParams(query)}`)
       } else child.loadFile(join(__dirname, '../renderer/index.html'), { query })
+    },
+  )
+  ipcMain.handle(
+    IPC.downloadSocial,
+    async (
+      _event,
+      platform: 'youtube' | 'instagram',
+      urlValue: string,
+      allowInvalidCertificate = false,
+    ) => {
+      let url: URL
+      try {
+        url = new URL(urlValue.trim())
+      } catch {
+        return { ok: false as const, error: 'Paste a complete HTTPS media URL.' }
+      }
+      const allowed =
+        platform === 'youtube'
+          ? /(^|\.)youtube\.com$|(^|\.)youtu\.be$/i.test(url.hostname)
+          : /(^|\.)instagram\.com$/i.test(url.hostname)
+      if (url.protocol !== 'https:' || !allowed)
+        return {
+          ok: false as const,
+          error: `Enter a valid ${platform === 'youtube' ? 'YouTube' : 'Instagram'} URL.`,
+        }
+      const destination = join(app.getPath('downloads'), platform)
+      mkdirSync(destination, { recursive: true })
+      const executableName = process.platform === 'win32' ? 'yt-dlp.exe' : 'yt-dlp'
+      const executable =
+        [
+          join(app.getAppPath(), 'vendor', executableName),
+          join(process.resourcesPath, 'vendor', executableName),
+        ].find(existsSync) ?? executableName
+      const ffmpegDirectory = [
+        join(app.getAppPath(), 'vendor'),
+        join(process.resourcesPath, 'vendor'),
+      ].find((directory) =>
+        existsSync(join(directory, process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg')),
+      )
+      return await new Promise<{ ok: true; filePath: string } | { ok: false; error: string }>(
+        (resolve) => {
+          const output: string[] = []
+          let failedToStart = false
+          const args = [
+            '--no-playlist',
+            '--compat-options',
+            'no-certifi',
+            '--js-runtimes',
+            'node',
+            '--newline',
+            '--no-progress',
+            '--retries',
+            '10',
+            '--extractor-retries',
+            '5',
+            '--fragment-retries',
+            '10',
+            '-f',
+            'bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best',
+            '--merge-output-format',
+            'mp4',
+            '-P',
+            destination,
+            '-o',
+            '%(title)s [%(id)s].%(ext)s',
+            '--print',
+            'after_move:filepath',
+            url.href,
+          ]
+          if (ffmpegDirectory) args.unshift('--ffmpeg-location', ffmpegDirectory)
+          if (allowInvalidCertificate) args.unshift('--no-check-certificates')
+          const process = spawn(executable, args, { stdio: ['ignore', 'pipe', 'pipe'] })
+          process.stdout.on('data', (chunk) => output.push(String(chunk)))
+          process.stderr.on('data', (chunk) => output.push(String(chunk)))
+          process.once('error', (error) => {
+            failedToStart = true
+            resolve({
+              ok: false,
+              error: error.message.includes('ENOENT')
+                ? 'The bundled yt-dlp executable could not be found.'
+                : error.message,
+            })
+          })
+          process.once('close', (code) => {
+            if (failedToStart) return
+            const lines = output.join('').trim().split(/\r?\n/).filter(Boolean)
+            if (code === 0) resolve({ ok: true, filePath: lines.at(-1) ?? destination })
+            else
+              resolve({
+                ok: false,
+                error: lines.slice(-3).join('\n') || `yt-dlp exited with code ${code}`,
+              })
+          })
+        },
+      )
     },
   )
   ipcMain.removeHandler(IPC.startNow)

@@ -13,6 +13,7 @@ export const IPC = {
   showProgress: 'downloads:show-progress',
   showListWindow: 'downloads:show-list-window',
   showUtilityWindow: 'downloads:show-utility-window',
+  downloadSocial: 'downloads:download-social',
   add: 'downloads:add',
   startNow: 'downloads:start-now',
   enqueue: 'downloads:enqueue',
@@ -51,10 +52,15 @@ export interface DownloadApi {
   showProgress(id: string): Promise<void>
   showListWindow(mode: 'import' | 'export', ids: string[], queueId?: string): Promise<void>
   showUtilityWindow(
-    mode: 'add' | 'scheduler' | 'options' | 'delete',
+    mode: 'add' | 'scheduler' | 'options' | 'delete' | 'youtube' | 'instagram',
     ids?: string[],
     queueId?: string,
   ): Promise<void>
+  downloadSocial(
+    platform: 'youtube' | 'instagram',
+    url: string,
+    allowInvalidCertificate?: boolean,
+  ): Promise<{ ok: true; filePath: string } | { ok: false; error: string }>
   add(
     url: string,
     queued?: boolean,

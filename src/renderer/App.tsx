@@ -15,6 +15,7 @@ import {
   FolderOpen,
   Globe2,
   HardDriveDownload,
+  Instagram,
   Link2,
   ListStart,
   Music2,
@@ -23,6 +24,7 @@ import {
   Square,
   Trash2,
   Video,
+  Youtube,
   X,
 } from 'lucide-react'
 import type {
@@ -61,10 +63,12 @@ export function App() {
   if (id) return <ProgressWindow id={id} />
   if (listDialog === 'import' || listDialog === 'export')
     return <ListDialogWindow mode={listDialog} params={params} />
-  if (['add', 'scheduler', 'options', 'delete'].includes(utilityDialog ?? ''))
+  if (
+    ['add', 'scheduler', 'options', 'delete', 'youtube', 'instagram'].includes(utilityDialog ?? '')
+  )
     return (
       <UtilityDialogWindow
-        mode={utilityDialog as 'add' | 'scheduler' | 'options' | 'delete'}
+        mode={utilityDialog as 'add' | 'scheduler' | 'options' | 'delete' | 'youtube' | 'instagram'}
         params={params}
       />
     )
@@ -75,7 +79,7 @@ function UtilityDialogWindow({
   mode,
   params,
 }: {
-  mode: 'add' | 'scheduler' | 'options' | 'delete'
+  mode: 'add' | 'scheduler' | 'options' | 'delete' | 'youtube' | 'instagram'
   params: URLSearchParams
 }) {
   const [queues, setQueues] = useState<DownloadQueue[]>([])
@@ -85,6 +89,7 @@ function UtilityDialogWindow({
     window.downloads.listQueues().then(setQueues)
     window.downloads.getSegmentCount().then(setSegmentCount)
   }, [])
+  if (mode === 'youtube' || mode === 'instagram') return <SocialDownloadWindow platform={mode} />
   if (mode === 'add')
     return (
       <AddDownloadWindow queues={queues} segmentCount={segmentCount} initialQueue={initialQueue} />
@@ -128,6 +133,78 @@ function UtilityDialogWindow({
       </div>
     )
   return <DeleteFilesWindow ids={params.get('ids')?.split(',').filter(Boolean) ?? []} />
+}
+
+function SocialDownloadWindow({ platform }: { platform: 'youtube' | 'instagram' }) {
+  const [url, setUrl] = useState('')
+  const [statusMessage, setStatusMessage] = useState('')
+  const [downloading, setDownloading] = useState(false)
+  const [allowInvalidCertificate, setAllowInvalidCertificate] = useState(false)
+  const label = platform === 'youtube' ? 'YouTube' : 'Instagram'
+  const Icon = platform === 'youtube' ? Youtube : Instagram
+  const download = async () => {
+    setDownloading(true)
+    setStatusMessage('Resolving available media and downloading…')
+    try {
+      const result = await window.downloads.downloadSocial(
+        platform,
+        url.trim(),
+        allowInvalidCertificate,
+      )
+      setStatusMessage(result.ok ? `Saved to ${result.filePath}` : result.error)
+    } catch (reason) {
+      setStatusMessage(
+        reason instanceof Error ? reason.message : `Unable to download from ${label}.`,
+      )
+    } finally {
+      setDownloading(false)
+    }
+  }
+  return (
+    <div className={`native-dialog-host social-window ${platform}`}>
+      <div className="window-dialog social-dialog">
+        <div className="dialog-title">
+          Download from {label}
+          <button onClick={() => window.close()}>×</button>
+        </div>
+        <div className="social-body">
+          <Icon />
+          <div>
+            <h2>{label} media downloader</h2>
+            <p>Paste a public post, reel, or video URL.</p>
+          </div>
+          <label htmlFor="social-url">Media address</label>
+          <input
+            id="social-url"
+            autoFocus
+            placeholder={`https://${platform === 'youtube' ? 'youtube.com/watch?v=…' : 'instagram.com/reel/…'}`}
+            value={url}
+            onChange={(event) => setUrl(event.target.value)}
+          />
+          <small>
+            Download only media you own or have permission to save. Private, paid, and DRM-protected
+            content is not bypassed.
+          </small>
+          <label className="social-certificate-option">
+            <input
+              type="checkbox"
+              checked={allowInvalidCertificate}
+              onChange={(event) => setAllowInvalidCertificate(event.target.checked)}
+            />
+            Allow untrusted certificates (less secure; use only if normal downloads report a
+            certificate error)
+          </label>
+          {statusMessage && <div className="social-status">{statusMessage}</div>}
+        </div>
+        <div className="dialog-actions">
+          <button className="primary" disabled={!url.trim() || downloading} onClick={download}>
+            {downloading ? 'Downloading…' : 'Download'}
+          </button>
+          <button onClick={() => window.close()}>Close</button>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 function DeleteFilesWindow({ ids }: { ids: string[] }) {
@@ -904,6 +981,21 @@ function MainApp() {
           }}
         />
         <Tool icon={<Globe2 />} label="Grabber" color="blue" />
+        <span className="separator social-separator" aria-hidden="true" />
+        <Tool
+          icon={<Instagram />}
+          label="Instagram"
+          color="pink"
+          title="Download permitted media from Instagram"
+          onClick={() => window.downloads.showUtilityWindow('instagram')}
+        />
+        <Tool
+          icon={<Youtube />}
+          label="YouTube"
+          color="red"
+          title="Download permitted media from YouTube"
+          onClick={() => window.downloads.showUtilityWindow('youtube')}
+        />
       </div>
       <div
         className="workspace"

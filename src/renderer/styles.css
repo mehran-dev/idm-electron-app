@@ -169,6 +169,9 @@ input {
 .tool.gray svg {
   color: #777;
 }
+.tool.pink svg {
+  color: #d62976;
+}
 .separator {
   height: 56px;
   border-left: 1px solid #bcbcbc;
@@ -495,9 +498,6 @@ legend {
   .tool {
     width: 59px;
   }
-  .toolbar .tool:nth-last-child(-n + 2) {
-    display: none;
-  }
 }
 .dialog-actions button {
   width: auto;
@@ -814,6 +814,53 @@ legend {
 .native-list-dialog > .window-dialog > .import-body,
 .native-confirm > .window-dialog > .confirm-body {
   flex: 1;
+}
+.social-dialog {
+  display: flex;
+  flex-direction: column;
+}
+.social-body {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 52px 1fr;
+  align-content: start;
+  gap: 8px 14px;
+  padding: 22px;
+}
+.social-body > svg {
+  width: 48px;
+  height: 48px;
+  color: #d62976;
+}
+.social-window.youtube .social-body > svg {
+  color: #e62117;
+}
+.social-body h2,
+.social-body p {
+  margin: 0 0 5px;
+}
+.social-body > label,
+.social-body > input,
+.social-body > small,
+.social-status {
+  grid-column: 1 / -1;
+}
+.social-body > input {
+  height: 31px;
+  padding: 5px 8px;
+  border: 1px solid #888;
+}
+.social-body > small {
+  color: #666;
+  line-height: 1.45;
+}
+.social-status {
+  margin-top: 8px;
+  padding: 9px;
+  border: 1px solid #9bbbd7;
+  background: #eef7ff;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 .scheduler-dialog {
   width: 650px;
