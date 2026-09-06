@@ -137,6 +137,7 @@ function UtilityDialogWindow({
 
 function SocialDownloadWindow({ platform }: { platform: 'youtube' | 'instagram' }) {
   const [url, setUrl] = useState('')
+  const [proxyUrl, setProxyUrl] = useState('')
   const [completed, setCompleted] = useState(false)
   const [statusMessage, setStatusMessage] = useState('')
   const [downloading, setDownloading] = useState(false)
@@ -170,6 +171,7 @@ function SocialDownloadWindow({ platform }: { platform: 'youtube' | 'instagram' 
         platform,
         url.trim(),
         allowInvalidCertificate,
+        proxyUrl.trim(),
       )
       setCompleted(result.ok)
       setStatusMessage(result.ok ? `Saved to ${result.filePath}` : result.error)
@@ -192,7 +194,11 @@ function SocialDownloadWindow({ platform }: { platform: 'youtube' | 'instagram' 
           <Icon />
           <div>
             <h2>{label} media downloader</h2>
-            <p>Paste a public post, reel, or video URL.</p>
+            <p>
+              {platform === 'instagram'
+                ? 'Open a video or reel on Instagram, then copy and paste its link.'
+                : 'Paste a public post, reel, or video URL.'}
+            </p>
           </div>
           <label htmlFor="social-url">Media address</label>
           <input
@@ -210,6 +216,19 @@ function SocialDownloadWindow({ platform }: { platform: 'youtube' | 'instagram' 
           <small>
             Download only media you own or have permission to save. Private, paid, and DRM-protected
             content is not bypassed.
+          </small>
+          <label htmlFor="social-proxy">Proxy (optional)</label>
+          <input
+            id="social-proxy"
+            value={proxyUrl}
+            disabled={downloading}
+            placeholder="http://127.0.0.1:PORT or socks5://127.0.0.1:PORT"
+            onChange={(event) => setProxyUrl(event.target.value)}
+            autoComplete="off"
+            spellCheck={false}
+          />
+          <small>
+            Use the address and port shown in your VPN app. Leave blank for automatic settings.
           </small>
           <label className="social-certificate-option">
             <input

@@ -167,8 +167,8 @@ export function registerDownloadDialogHandlers(
         scheduler: [680, 570],
         options: [760, 620],
         delete: [540, 300],
-        youtube: [570, 390],
-        instagram: [570, 390],
+        youtube: [570, 490],
+        instagram: [570, 490],
       } as const
       const titles = {
         add: 'Add download',
@@ -207,6 +207,7 @@ export function registerDownloadDialogHandlers(
       platform: 'youtube' | 'instagram',
       urlValue: string,
       allowInvalidCertificate = false,
+      proxyUrl = '',
     ) => {
       let url: URL
       try {
@@ -223,6 +224,38 @@ export function registerDownloadDialogHandlers(
           ok: false as const,
           error: `Enter a valid ${platform === 'youtube' ? 'YouTube' : 'Instagram'} URL.`,
         }
+      if (platform === 'instagram') {
+        const mediaPath = url.pathname.match(
+          /^\/(?:[^/]+\/)?(p|reel|reels|tv)\/([A-Za-z0-9_-]+)\/?$/,
+        )
+        if (!mediaPath || (mediaPath[1] === 'reels' && mediaPath[2] === 'audio'))
+          return {
+            ok: false as const,
+            error:
+              'Open an individual Instagram video or reel and copy its link. Use instagram.com/reel/… or instagram.com/p/…; popular, explore, profile, and audio pages are not video links.',
+          }
+        url = new URL(`https://www.instagram.com/${mediaPath[1]}/${mediaPath[2]}/`)
+      }
+      let explicitProxy: string | undefined
+      if (proxyUrl.trim()) {
+        try {
+          const parsed = new URL(proxyUrl.trim())
+          if (
+            !['http:', 'https:', 'socks4:', 'socks5:', 'socks5h:'].includes(parsed.protocol) ||
+            !parsed.hostname ||
+            parsed.search ||
+            parsed.hash ||
+            (parsed.pathname && parsed.pathname !== '/')
+          )
+            throw new Error('Invalid proxy')
+          explicitProxy = parsed.href
+        } catch {
+          return {
+            ok: false as const,
+            error: 'Enter a valid HTTP or SOCKS proxy URL from your VPN app, including its port.',
+          }
+        }
+      }
       const destination = join(app.getPath('downloads'), platform)
       console.info('[social-download] request', { platform, senderId: event.sender.id })
       socialProgressByWebContents.set(event.sender.id, {
@@ -247,6 +280,49 @@ export function registerDownloadDialogHandlers(
       ].find((directory) =>
         existsSync(join(directory, process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg')),
       )
+      // Child processes do not inherit Chromium's system/PAC proxy resolution.
+      // Keep explicit environment proxy settings under yt-dlp's control.
+      let systemProxy: string | undefined
+      const hasEnvironmentProxy = [
+        'https_proxy',
+        'HTTPS_PROXY',
+        'all_proxy',
+        'ALL_PROXY',
+        'http_proxy',
+        'HTTP_PROXY',
+      ].some((key) => Boolean(process.env[key]))
+      // Preserve YouTube's existing yt-dlp routing unless a proxy is explicitly entered.
+      if (platform === 'instagram' && !explicitProxy && !hasEnvironmentProxy) {
+        try {
+          const route = await event.sender.session.resolveProxy(url.href)
+          const firstRoute = route.split(';')[0]?.trim() ?? ''
+          const match = /^(PROXY|HTTPS|SOCKS4|SOCKS5|SOCKS)\s+(\S+)$/i.exec(firstRoute)
+          if (match) {
+            const scheme = {
+              PROXY: 'http',
+              HTTPS: 'https',
+              SOCKS4: 'socks4',
+              SOCKS5: 'socks5',
+              SOCKS: 'socks4',
+            }[match[1]!.toUpperCase()]
+            systemProxy = `${scheme}://${match[2]}`
+          }
+        } catch {
+          console.warn(
+            '[social-download] system proxy resolution failed; using downloader configuration',
+          )
+        }
+      }
+      console.info('[social-download] connection', {
+        senderId: event.sender.id,
+        proxySource: explicitProxy
+          ? 'manual'
+          : hasEnvironmentProxy
+            ? 'environment'
+            : systemProxy
+              ? 'system'
+              : 'downloader default',
+      })
       return await new Promise<{ ok: true; filePath: string } | { ok: false; error: string }>(
         (resolve) => {
           const output: string[] = []
@@ -304,6 +380,9 @@ export function registerDownloadDialogHandlers(
             '--no-quiet',
             url.href,
           ]
+          const downloadProxy = explicitProxy || systemProxy
+          if (downloadProxy) args.unshift('--proxy', downloadProxy)
+          if (platform === 'instagram') args.unshift('--use-extractors', 'Instagram')
           if (ffmpegDirectory) args.unshift('--ffmpeg-location', ffmpegDirectory)
           if (allowInvalidCertificate) args.unshift('--no-check-certificates')
           const downloaderProcess = spawn(executable, args, {
@@ -319,6 +398,8 @@ export function registerDownloadDialogHandlers(
             const text = String(chunk)
             output.push(text)
             console.debug('[social-download] output', text.trim().slice(0, 500))
+            if (platform === 'instagram' && /Setting up session/i.test(text))
+              reportProgress(0, 'Connecting to Instagram…')
             if (/Extracting URL/i.test(text)) reportProgress(0, 'Checking media address…')
             if (/Downloading webpage/i.test(text)) reportProgress(0, 'Loading video page…')
             if (/Downloading .*API JSON/i.test(text))
@@ -367,11 +448,22 @@ export function registerDownloadDialogHandlers(
                 socialFilesByWebContents.set(event.sender.id, finalPath || destination)
               reportProgress(100, 'Download complete')
               resolve({ ok: true, filePath: finalPath || destination })
-            } else
+            } else {
+              const details = lines.slice(-3).join('\n') || `yt-dlp exited with code ${code}`
+              const networkUnavailable =
+                /Network is unreachable|No route to host|Network is down/i.test(details)
+              const connectionTimedOut = /Connection timed out|connect timeout|curl: \(28\)/i.test(
+                details,
+              )
               resolve({
                 ok: false,
-                error: lines.slice(-3).join('\n') || `yt-dlp exited with code ${code}`,
+                error: connectionTimedOut
+                  ? `Connection to ${platform === 'instagram' ? 'Instagram' : 'YouTube'} timed out before the download could finish. Enter the HTTP/SOCKS proxy address from your VPN app in the Proxy field, or enable its system-wide VPN mode, then retry.`
+                  : networkUnavailable
+                    ? `Cannot connect to ${platform === 'instagram' ? 'Instagram' : 'YouTube'}: the network is unreachable. Check your internet connection and VPN/proxy, then retry. No file was downloaded.`
+                    : details,
               })
+            }
           })
         },
       )

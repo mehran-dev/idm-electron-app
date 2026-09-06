@@ -64,6 +64,7 @@ export interface DownloadApi {
     platform: 'youtube' | 'instagram',
     url: string,
     allowInvalidCertificate?: boolean,
+    proxyUrl?: string,
   ): Promise<{ ok: true; filePath: string } | { ok: false; error: string }>
   openSocialFile(): Promise<string>
   showSocialFileInFolder(): Promise<void>
