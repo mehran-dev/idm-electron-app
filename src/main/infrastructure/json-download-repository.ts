@@ -93,7 +93,11 @@ export class JsonDownloadRepository implements DownloadRepository {
               ...queue,
               concurrency: Math.max(1, Math.min(10, queue.concurrency || 1)),
             })
-      if ([1, 2, 4, 6, 8].includes(parsed.settings?.segmentCount ?? 0))
+      if (
+        Number.isInteger(parsed.settings?.segmentCount) &&
+        parsed.settings!.segmentCount! >= 1 &&
+        parsed.settings!.segmentCount! <= 8
+      )
         this.segmentCount = parsed.settings!.segmentCount!
     } catch (error) {
       console.error('[Download history could not be loaded]', error)

@@ -24,11 +24,12 @@ export class DownloadService {
   listQueues = () => this.repo.allQueues()
   getSegmentCount = () => this.repo.getSegmentCount()
   setSegmentCount = (value: number) =>
-    this.repo.setSegmentCount([1, 2, 4, 6, 8].includes(value) ? value : 4)
+    this.repo.setSegmentCount(Number.isInteger(value) && value >= 1 && value <= 8 ? value : 4)
   setItemSegmentCount = (id: string, value: number) => {
     const item = this.repo.get(id)
     if (!item || this.engine.isActive(id)) return
-    item.segmentCount = [1, 2, 4, 6, 8].includes(value) ? value : this.repo.getSegmentCount()
+    item.segmentCount =
+      Number.isInteger(value) && value >= 1 && value <= 8 ? value : this.repo.getSegmentCount()
     this.repo.save(item)
     this.notify()
   }
@@ -170,9 +171,10 @@ export class DownloadService {
     const fileName = savePath
       ? basename(savePath)
       : decodeURIComponent(basename(url.pathname)) || `download-${Date.now()}`
-    const chosen = [1, 2, 4, 6, 8].includes(segmentCount ?? 0)
-      ? segmentCount!
-      : this.repo.getSegmentCount()
+    const chosen =
+      Number.isInteger(segmentCount) && segmentCount! >= 1 && segmentCount! <= 8
+        ? segmentCount!
+        : this.repo.getSegmentCount()
     const item: DownloadItem = {
       id: randomUUID(),
       url: url.href,

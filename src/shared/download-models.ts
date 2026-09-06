@@ -19,6 +19,7 @@ export interface DownloadItem {
   createdAt: string
   segmentCount?: number
   segmentProgress?: number[]
+  connectionInfo?: string
   queueId?: string
   error?: string
   completion?: CompletionOptions

@@ -300,7 +300,7 @@ function AddDownloadWindow({
                     value={segments}
                     onChange={(event) => setSegments(Number(event.target.value))}
                   >
-                    {[1, 2, 4, 6, 8].map((value) => (
+                    {Array.from({ length: 8 }, (_, index) => index + 1).map((value) => (
                       <option key={value}>{value}</option>
                     ))}
                   </select>
@@ -1030,7 +1030,7 @@ function MainApp() {
                         value={fileSegments}
                         onChange={(e) => setFileSegments(Number(e.target.value))}
                       >
-                        {[1, 2, 4, 6, 8].map((value) => (
+                        {Array.from({ length: 8 }, (_, index) => index + 1).map((value) => (
                           <option value={value} key={value}>
                             {value}
                           </option>
@@ -1529,7 +1529,7 @@ function OptionsDialog({
                 <label>
                   Default max. conn. number{' '}
                   <select value={segments} onChange={(e) => setSegments(Number(e.target.value))}>
-                    {[1, 2, 4, 6, 8].map((value) => (
+                    {Array.from({ length: 8 }, (_, index) => index + 1).map((value) => (
                       <option value={value} key={value}>
                         {value}
                       </option>
@@ -1603,6 +1603,12 @@ function OptionsDialog({
 function DownloadProgress({ item, onClose }: { item: DownloadItem; onClose: () => void }) {
   const [tab, setTab] = useState<'status' | 'speed' | 'completion'>('status'),
     percent = item.totalBytes ? Math.min(100, (item.receivedBytes / item.totalBytes) * 100) : 0
+  const configuredSegmentCount = Math.max(1, item.segmentCount ?? 1)
+  const activeSegmentCount = item.segmentProgress?.length ?? configuredSegmentCount
+  const segmentValues = Array.from(
+    { length: configuredSegmentCount },
+    (_, index) => item.segmentProgress?.[index] ?? 0,
+  )
   return (
     <div className="dialog-shade">
       <div className="window-dialog progress-dialog">
@@ -1662,11 +1668,9 @@ function DownloadProgress({ item, onClose }: { item: DownloadItem; onClose: () =
             </div>
             <div
               className="overall-progress segmented-progress"
-              title={`${percent.toFixed(2)}% total — ${item.segmentProgress?.length ?? item.segmentCount ?? 1} connection(s)`}
+              title={`${percent.toFixed(2)}% total — ${activeSegmentCount} active connection(s)`}
             >
-              {(
-                item.segmentProgress ?? Array.from({ length: item.segmentCount ?? 1 }, () => 0)
-              ).map((segmentPercent, index) => (
+              {segmentValues.map((segmentPercent, index) => (
                 <span className="overall-segment" key={index}>
                   <i style={{ width: `${Math.min(100, segmentPercent)}%` }} />
                 </span>
@@ -1674,22 +1678,31 @@ function DownloadProgress({ item, onClose }: { item: DownloadItem; onClose: () =
             </div>
             <div className="segment-head">
               <b>Connection details</b>
-              <span>{item.segmentProgress?.length ?? item.segmentCount ?? 1} connection(s)</span>
+              <span>
+                {activeSegmentCount === configuredSegmentCount
+                  ? `${configuredSegmentCount} connection(s)`
+                  : `${activeSegmentCount} active / ${configuredSegmentCount} configured`}
+              </span>
             </div>
             <div className="segments">
-              {(
-                item.segmentProgress ?? Array.from({ length: item.segmentCount ?? 1 }, () => 0)
-              ).map((value, index) => (
+              {segmentValues.map((value, index) => (
                 <div className="segment-row" key={index}>
                   <span>{index + 1}</span>
                   <div>
                     <i style={{ width: `${value}%` }} />
                   </div>
-                  <em>{item.status === 'downloading' ? 'Receiving data...' : item.status}</em>
+                  <em>
+                    {index >= activeSegmentCount
+                      ? 'Not in use'
+                      : item.status === 'downloading'
+                        ? 'Receiving data...'
+                        : item.status}
+                  </em>
                   <b>{value.toFixed(1)}%</b>
                 </div>
               ))}
             </div>
+            {item.connectionInfo && <p>{item.connectionInfo}</p>}
           </>
         )}
         <div className="progress-actions">

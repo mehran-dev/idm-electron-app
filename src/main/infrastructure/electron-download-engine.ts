@@ -7,6 +7,7 @@ interface Segment {
   end: number
   received: number
   done: boolean
+  rangeRetries: number
 }
 interface ActiveDownload {
   requests: Set<ClientRequest>
@@ -45,12 +46,12 @@ export class ElectronDownloadEngine {
       if (probe.total > 0) ftruncateSync(file, probe.total)
       const count =
         probe.ranges && probe.total > 0 ? Math.min(item.segmentCount ?? 1, probe.total) : 1
-      const size = probe.total > 0 ? Math.ceil(probe.total / count) : 0
       const segments = Array.from({ length: count }, (_, index) => ({
-        start: index * size,
-        end: probe.total > 0 ? Math.min(probe.total - 1, (index + 1) * size - 1) : -1,
+        start: Math.floor((index * probe.total) / count),
+        end: probe.total > 0 ? Math.floor(((index + 1) * probe.total) / count) - 1 : -1,
         received: 0,
         done: false,
+        rangeRetries: 0,
       }))
       const state: ActiveDownload = {
         requests: new Set(),
@@ -71,6 +72,9 @@ export class ElectronDownloadEngine {
       item.segmentProgress = segments.map(() => 0)
       item.status = 'downloading'
       item.error = undefined
+      item.connectionInfo = probe.ranges
+        ? undefined
+        : 'Using one connection: the range probe did not confirm byte-range support.'
       this.repo.save(item)
       this.changed()
       console.info('[Segmented download started]', {
@@ -89,6 +93,7 @@ export class ElectronDownloadEngine {
       item = this.repo.get(id)
     if (!state || !item) return
     state.paused = true
+    state.generation += 1
     for (const request of state.requests) request.abort()
     state.requests.clear()
     item.status = 'paused'
@@ -100,7 +105,7 @@ export class ElectronDownloadEngine {
   resume(id: string) {
     const state = this.active.get(id),
       item = this.repo.get(id)
-    if (!state || !item) return
+    if (!state || !item || !state.paused) return
     state.paused = false
     item.status = 'downloading'
     this.repo.save(item)
@@ -129,16 +134,42 @@ export class ElectronDownloadEngine {
       let settled = false
       const request = net.request({ url, method: 'GET', session: this.session, redirect: 'follow' })
       request.setHeader('Range', 'bytes=0-0')
+      request.setHeader('Accept-Encoding', 'identity')
+      request.setHeader('Cache-Control', 'no-cache')
+      request.setHeader('Pragma', 'no-cache')
       request.on('response', (response) => {
         const header = (name: string) => {
           const value = response.headers[name]
           return Array.isArray(value) ? (value[0] ?? '') : (value ?? '')
         }
-        const contentRange = header('content-range')
+        const contentRange = header('content-range').trim()
         const match = contentRange.match(/^bytes\s+0-0\/(\d+)$/i)
         const ranges = response.statusCode === 206 && Boolean(match)
         const total = Number(match?.[1] ?? header('content-length') ?? 0)
+        console.info('[Download range probe]', {
+          requestedRange: 'bytes=0-0',
+          statusCode: response.statusCode,
+          contentRange,
+          contentLength: header('content-length'),
+          acceptRanges: header('accept-ranges'),
+          ranges,
+          total,
+        })
         settled = true
+        if (
+          ![200, 206].includes(response.statusCode) ||
+          !Number.isSafeInteger(total) ||
+          total < 0 ||
+          (response.statusCode === 206 && !ranges)
+        ) {
+          reject(
+            new Error(
+              `Invalid range probe response: HTTP ${response.statusCode}, Content-Range: ${contentRange || '(missing)'}`,
+            ),
+          )
+          request.abort()
+          return
+        }
         resolve({ total, ranges })
         request.abort()
       })
@@ -164,29 +195,70 @@ export class ElectronDownloadEngine {
     generation: number,
   ) {
     const requestedStart = segment.start + segment.received
+    let superseded = false
     const request = net.request({ url, method: 'GET', session: this.session, redirect: 'follow' })
     state.requests.add(request)
     if (segment.end >= 0) request.setHeader('Range', `bytes=${requestedStart}-${segment.end}`)
+    request.setHeader('Accept-Encoding', 'identity')
+    request.setHeader('Cache-Control', 'no-cache')
+    request.setHeader('Pragma', 'no-cache')
+    console.debug('[Download segment request]', {
+      id,
+      segment: state.segments.indexOf(segment) + 1,
+      range: segment.end >= 0 ? `bytes=${requestedStart}-${segment.end}` : 'full response',
+    })
     request.on('response', (response) => {
       if (generation !== state.generation) return
       if (response.statusCode >= 400) {
         this.fail(id, new Error(`Server returned HTTP ${response.statusCode}`))
         return
       }
-      const contentRangeValue = response.headers['content-range']
-      const contentRange = Array.isArray(contentRangeValue)
-        ? (contentRangeValue[0] ?? '')
-        : (contentRangeValue ?? '')
+      const contentRangeValue = Object.entries(response.headers).find(
+        ([name]) => name.toLowerCase() === 'content-range',
+      )?.[1]
+      const contentRange = (
+        Array.isArray(contentRangeValue) ? (contentRangeValue[0] ?? '') : (contentRangeValue ?? '')
+      ).trim()
       const range = contentRange.match(/^bytes\s+(\d+)-(\d+)\/(\d+|\*)$/i)
       const mustHonorRange = state.segments.length > 1 || requestedStart > 0
       const validRange =
         response.statusCode === 206 &&
         Number(range?.[1]) === requestedStart &&
-        Number(range?.[2]) <= segment.end
-      if (mustHonorRange && !validRange) {
-        this.fallbackToSingleConnection(id, url, state, generation)
+        Number(range?.[2]) >= requestedStart &&
+        Number(range?.[2]) <= segment.end &&
+        Number(range?.[3]) === this.repo.get(id)?.totalBytes
+      if ((mustHonorRange || response.statusCode === 206) && !validRange) {
+        console.warn('[Download range rejected]', {
+          url,
+          requestedStart,
+          requestedEnd: segment.end,
+          statusCode: response.statusCode,
+          contentRange,
+        })
+        state.requests.delete(request)
+        superseded = true
+        request.abort()
+        if (segment.rangeRetries < 2) {
+          segment.rangeRetries += 1
+          console.warn('[Download range retry]', {
+            id,
+            segment: state.segments.indexOf(segment) + 1,
+            attempt: segment.rangeRetries,
+          })
+          setTimeout(() => {
+            if (!state.paused && !state.cancelled && generation === state.generation)
+              this.runSegment(id, url, segment, state, generation)
+          }, 200 * segment.rangeRetries)
+        } else this.fallbackToSingleConnection(id, url, state, generation)
         return
       }
+      segment.rangeRetries = 0
+      console.debug('[Download segment accepted]', {
+        id,
+        segment: state.segments.indexOf(segment) + 1,
+        statusCode: response.statusCode,
+        contentRange,
+      })
       response.on('data', (chunk: Buffer) => {
         if (state.paused || state.cancelled || segment.done || generation !== state.generation)
           return
@@ -207,24 +279,42 @@ export class ElectronDownloadEngine {
       })
       response.on('end', () => {
         state.requests.delete(request)
-        if (state.paused || state.cancelled || segment.done || generation !== state.generation)
+        if (
+          superseded ||
+          state.paused ||
+          state.cancelled ||
+          segment.done ||
+          generation !== state.generation
+        )
           return
         const expected = segment.end >= 0 ? segment.end - segment.start + 1 : segment.received
         if (segment.received < expected) {
-          this.fail(id, new Error('The server ended a file segment before all bytes arrived.'))
+          this.runSegment(id, url, segment, state, generation)
           return
         }
         this.finishSegment(id, segment, state, request)
       })
       response.on('error', (error) => {
         state.requests.delete(request)
-        if (!state.paused && !state.cancelled && !segment.done && generation === state.generation)
+        if (
+          !superseded &&
+          !state.paused &&
+          !state.cancelled &&
+          !segment.done &&
+          generation === state.generation
+        )
           this.fail(id, error)
       })
     })
     request.on('error', (error) => {
       state.requests.delete(request)
-      if (!state.paused && !state.cancelled && !segment.done && generation === state.generation)
+      if (
+        !superseded &&
+        !state.paused &&
+        !state.cancelled &&
+        !segment.done &&
+        generation === state.generation
+      )
         this.fail(id, error)
     })
     request.end()
@@ -258,14 +348,20 @@ export class ElectronDownloadEngine {
     const item = this.repo.get(id)
     if (!item) return
     state.segments = [
-      { start: 0, end: item.totalBytes > 0 ? item.totalBytes - 1 : -1, received: 0, done: false },
+      {
+        start: 0,
+        end: item.totalBytes > 0 ? item.totalBytes - 1 : -1,
+        received: 0,
+        done: false,
+        rangeRetries: 0,
+      },
     ]
     state.lastBytes = 0
     state.lastTime = Date.now()
     if (item.totalBytes > 0) ftruncateSync(state.file, item.totalBytes)
     item.receivedBytes = 0
     item.segmentProgress = [0]
-    item.error = 'Server ignored parallel ranges; safely switched to one connection.'
+    item.connectionInfo = 'Using one connection: parallel requests returned invalid byte ranges.'
     this.repo.save(item)
     this.changed()
     this.runSegments(id)
@@ -318,6 +414,8 @@ export class ElectronDownloadEngine {
   private fail(id: string, error: unknown) {
     const state = this.active.get(id)
     if (state) {
+      state.cancelled = true
+      state.generation += 1
       for (const request of state.requests) request.abort()
       try {
         closeSync(state.file)
