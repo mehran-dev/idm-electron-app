@@ -13,6 +13,12 @@ export const IPC = {
   showProgress: 'downloads:show-progress',
   showListWindow: 'downloads:show-list-window',
   showUtilityWindow: 'downloads:show-utility-window',
+  downloadSocial: 'downloads:download-social',
+  forgetYouTubeSession: 'downloads:forget-youtube-session',
+  openSocialFile: 'downloads:open-social-file',
+  showSocialFileInFolder: 'downloads:show-social-file-in-folder',
+  socialProgress: 'downloads:social-progress',
+  getSocialProgress: 'downloads:get-social-progress',
   add: 'downloads:add',
   startNow: 'downloads:start-now',
   enqueue: 'downloads:enqueue',
@@ -51,10 +57,21 @@ export interface DownloadApi {
   showProgress(id: string): Promise<void>
   showListWindow(mode: 'import' | 'export', ids: string[], queueId?: string): Promise<void>
   showUtilityWindow(
-    mode: 'add' | 'scheduler' | 'options' | 'delete',
+    mode: 'add' | 'scheduler' | 'options' | 'delete' | 'youtube' | 'instagram',
     ids?: string[],
     queueId?: string,
   ): Promise<void>
+  forgetYouTubeSession(): Promise<void>
+  downloadSocial(
+    platform: 'youtube' | 'instagram',
+    url: string,
+    allowInvalidCertificate?: boolean,
+    proxyUrl?: string,
+  ): Promise<{ ok: true; filePath: string } | { ok: false; error: string }>
+  openSocialFile(): Promise<string>
+  showSocialFileInFolder(): Promise<void>
+  onSocialProgress(listener: (value: { percent: number; status: string }) => void): () => void
+  getSocialProgress(): Promise<{ percent: number; status: string }>
   add(
     url: string,
     queued?: boolean,

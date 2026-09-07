@@ -1,8 +1,20 @@
-import { app, BrowserWindow, dialog, ipcMain, net, session } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, net, session, shell } from 'electron'
 import { basename, join } from 'node:path'
-import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { spawn } from 'node:child_process'
+import {
+  exportYouTubeCookies,
+  signInToYouTube,
+  forgetYouTubeSession,
+} from '../../infrastructure/youtube-session'
+import {
+  socialDownloadEnvironment,
+  hasCertificateError,
+} from '../../infrastructure/social-download-environment'
 import { IPC, type DownloadPreview } from '../../../shared/download'
 import type { DownloadService } from '../../application/download-service'
+const socialProgressByWebContents = new Map<number, { percent: number; status: string }>()
+const socialFilesByWebContents = new Map<number, string>()
 const category = (name: string, mime: string) =>
   mime.startsWith('video/')
     ? 'Video'
@@ -77,6 +89,20 @@ export function registerDownloadDialogHandlers(
   service: DownloadService,
   showProgress: (id: string) => void,
 ) {
+  ipcMain.handle(IPC.forgetYouTubeSession, () => forgetYouTubeSession())
+  ipcMain.handle(IPC.openSocialFile, async (event) => {
+    const path = socialFilesByWebContents.get(event.sender.id)
+    return path ? shell.openPath(path) : 'No completed download is available.'
+  })
+  ipcMain.handle(IPC.showSocialFileInFolder, (event) => {
+    const path = socialFilesByWebContents.get(event.sender.id)
+    if (path) shell.showItemInFolder(path)
+  })
+  ipcMain.handle(IPC.getSocialProgress, (event) =>
+    Promise.resolve(
+      socialProgressByWebContents.get(event.sender.id) ?? { percent: 0, status: 'Waiting…' },
+    ),
+  )
   ipcMain.handle(IPC.getCompletionSound, () => savedSound())
   ipcMain.handle(IPC.chooseCompletionSound, async () => {
     const selected = await dialog.showOpenDialog({
@@ -140,18 +166,27 @@ export function registerDownloadDialogHandlers(
   )
   ipcMain.handle(
     IPC.showUtilityWindow,
-    (_event, mode: 'add' | 'scheduler' | 'options' | 'delete', ids: string[], queueId?: string) => {
+    (
+      _event,
+      mode: 'add' | 'scheduler' | 'options' | 'delete' | 'youtube' | 'instagram',
+      ids: string[],
+      queueId?: string,
+    ) => {
       const sizes = {
         add: [620, 180],
         scheduler: [680, 570],
         options: [760, 620],
         delete: [540, 300],
+        youtube: [570, 560],
+        instagram: [570, 490],
       } as const
       const titles = {
         add: 'Add download',
         scheduler: 'Scheduler',
         options: 'Options',
         delete: 'Confirm file deletion',
+        youtube: 'Download from YouTube',
+        instagram: 'Download from Instagram',
       }
       const [width, height] = sizes[mode]
       const child = new BrowserWindow({
@@ -173,6 +208,356 @@ export function registerDownloadDialogHandlers(
       if (process.env.ELECTRON_RENDERER_URL) {
         child.loadURL(`${process.env.ELECTRON_RENDERER_URL}?${new URLSearchParams(query)}`)
       } else child.loadFile(join(__dirname, '../renderer/index.html'), { query })
+    },
+  )
+  ipcMain.handle(
+    IPC.downloadSocial,
+    async (
+      event,
+      platform: 'youtube' | 'instagram',
+      urlValue: string,
+      allowInvalidCertificate = false,
+      proxyUrl = '',
+    ) => {
+      let url: URL
+      try {
+        url = new URL(urlValue.trim())
+      } catch {
+        return { ok: false as const, error: 'Paste a complete HTTPS media URL.' }
+      }
+      const allowed =
+        platform === 'youtube'
+          ? /(^|\.)youtube\.com$|(^|\.)youtu\.be$/i.test(url.hostname)
+          : /(^|\.)instagram\.com$/i.test(url.hostname)
+      if (url.protocol !== 'https:' || !allowed)
+        return {
+          ok: false as const,
+          error: `Enter a valid ${platform === 'youtube' ? 'YouTube' : 'Instagram'} URL.`,
+        }
+      if (platform === 'instagram') {
+        const mediaPath = url.pathname.match(
+          /^\/(?:[^/]+\/)?(p|reel|reels|tv)\/([A-Za-z0-9_-]+)\/?$/,
+        )
+        if (!mediaPath || (mediaPath[1] === 'reels' && mediaPath[2] === 'audio'))
+          return {
+            ok: false as const,
+            error:
+              'Open an individual Instagram video or reel and copy its link. Use instagram.com/reel/… or instagram.com/p/…; popular, explore, profile, and audio pages are not video links.',
+          }
+        url = new URL(`https://www.instagram.com/${mediaPath[1]}/${mediaPath[2]}/`)
+      }
+      let explicitProxy: string | undefined
+      if (proxyUrl.trim()) {
+        try {
+          const parsed = new URL(proxyUrl.trim())
+          if (
+            !['http:', 'https:', 'socks4:', 'socks5:', 'socks5h:'].includes(parsed.protocol) ||
+            !parsed.hostname ||
+            parsed.search ||
+            parsed.hash ||
+            (parsed.pathname && parsed.pathname !== '/')
+          )
+            throw new Error('Invalid proxy')
+          explicitProxy = parsed.href
+        } catch {
+          return {
+            ok: false as const,
+            error: 'Enter a valid HTTP or SOCKS proxy URL from your VPN app, including its port.',
+          }
+        }
+      }
+      const destination = join(app.getPath('downloads'), platform)
+      console.info('[social-download] request', { platform, senderId: event.sender.id })
+      socialProgressByWebContents.set(event.sender.id, {
+        percent: 0,
+        status: `Connecting to ${platform === 'youtube' ? 'YouTube' : 'Instagram'}…`,
+      })
+      socialFilesByWebContents.delete(event.sender.id)
+      event.sender.once('destroyed', () => {
+        socialProgressByWebContents.delete(event.sender.id)
+        socialFilesByWebContents.delete(event.sender.id)
+      })
+      mkdirSync(destination, { recursive: true })
+      const executableName = process.platform === 'win32' ? 'yt-dlp.exe' : 'yt-dlp'
+      const executable =
+        [
+          join(app.getAppPath(), 'vendor', executableName),
+          join(process.resourcesPath, 'vendor', executableName),
+        ].find(existsSync) ?? executableName
+      const ffmpegDirectory = [
+        join(app.getAppPath(), 'vendor'),
+        join(process.resourcesPath, 'vendor'),
+      ].find((directory) =>
+        existsSync(join(directory, process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg')),
+      )
+      // Child processes do not inherit Chromium's system/PAC proxy resolution.
+      // Keep explicit environment proxy settings under yt-dlp's control.
+      let systemProxy: string | undefined
+      const hasEnvironmentProxy = [
+        'https_proxy',
+        'HTTPS_PROXY',
+        'all_proxy',
+        'ALL_PROXY',
+        'http_proxy',
+        'HTTP_PROXY',
+      ].some((key) => Boolean(process.env[key]))
+      if (!explicitProxy && !hasEnvironmentProxy) {
+        try {
+          const route = await event.sender.session.resolveProxy(url.href)
+          const firstRoute = route.split(';')[0]?.trim() ?? ''
+          const match = /^(PROXY|HTTPS|SOCKS4|SOCKS5|SOCKS)\s+(\S+)$/i.exec(firstRoute)
+          if (match) {
+            const scheme = {
+              PROXY: 'http',
+              HTTPS: 'https',
+              SOCKS4: 'socks4',
+              SOCKS5: 'socks5',
+              SOCKS: 'socks4',
+            }[match[1]!.toUpperCase()]
+            systemProxy = `${scheme}://${match[2]}`
+          }
+        } catch {
+          console.warn(
+            '[social-download] system proxy resolution failed; using downloader configuration',
+          )
+        }
+      }
+      console.info('[social-download] connection', {
+        senderId: event.sender.id,
+        proxySource: explicitProxy
+          ? 'manual'
+          : hasEnvironmentProxy
+            ? 'environment'
+            : systemProxy
+              ? 'system'
+              : 'downloader default',
+      })
+      let browserCookies = ''
+      const runDownload = async (
+        authenticatedRetry = false,
+      ): Promise<{ ok: true; filePath: string } | { ok: false; error: string }> => {
+        const cookieFile =
+          platform === 'youtube' && !browserCookies ? await exportYouTubeCookies() : undefined
+        try {
+          const result = await new Promise<
+            { ok: true; filePath: string } | { ok: false; error: string }
+          >((resolve) => {
+            const output: string[] = []
+            let failedToStart = false
+            let progressBuffer = ''
+            let finalPath = ''
+            const reportProgress = (percent: number, status: string) => {
+              if (event.sender.isDestroyed()) return
+              socialProgressByWebContents.set(event.sender.id, {
+                percent: Math.max(0, Math.min(100, percent)),
+                status,
+              })
+              console.info('[social-download] progress', {
+                senderId: event.sender.id,
+                percent: Math.max(0, Math.min(100, percent)),
+                status,
+              })
+              event.sender.send(IPC.socialProgress, {
+                percent: Math.max(0, Math.min(100, percent)),
+                status,
+              })
+            }
+            reportProgress(0, `Connecting to ${platform === 'youtube' ? 'YouTube' : 'Instagram'}…`)
+            const args = [
+              '--no-playlist',
+              '--socket-timeout',
+              '20',
+              '--retry-sleep',
+              'http:exp=1:4',
+              '--retry-sleep',
+              'extractor:exp=1:4',
+              '--compat-options',
+              'no-certifi',
+              '--js-runtimes',
+              `node:${process.execPath}`,
+              '--no-colors',
+              '--newline',
+              '--progress',
+              '--progress-delta',
+              '0.2',
+              '--progress-template',
+              'download:PROGRESS:%(progress.downloaded_bytes)s:%(progress.total_bytes,progress.total_bytes_estimate)s:%(progress._percent_str)s',
+              '--retries',
+              '3',
+              '--extractor-retries',
+              '3',
+              '--fragment-retries',
+              '3',
+              '--concurrent-fragments',
+              '4',
+              '-f',
+              'bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best',
+              '--merge-output-format',
+              'mp4',
+              '-P',
+              destination,
+              '-o',
+              '%(title)s [%(id)s].%(ext)s',
+              '--print',
+              'after_move:FINAL_PATH:%(filepath)s',
+              '--no-quiet',
+              url.href,
+            ]
+            const downloadProxy = explicitProxy || systemProxy
+            if (cookieFile) args.unshift('--cookies', cookieFile.path)
+            if (browserCookies) args.unshift('--cookies-from-browser', browserCookies)
+            if (platform === 'youtube') args.unshift('--ignore-config')
+            if (downloadProxy) args.unshift('--proxy', downloadProxy)
+            if (platform === 'instagram') args.unshift('--use-extractors', 'Instagram')
+            if (ffmpegDirectory) args.unshift('--ffmpeg-location', ffmpegDirectory)
+            if (allowInvalidCertificate) args.unshift('--no-check-certificates')
+            const downloaderProcess = spawn(executable, args, {
+              stdio: ['ignore', 'pipe', 'pipe'],
+              env: socialDownloadEnvironment(process.env),
+            })
+            console.info('[social-download] spawned', {
+              senderId: event.sender.id,
+              pid: downloaderProcess.pid,
+              executable,
+            })
+            const consumeOutput = (chunk: unknown) => {
+              const text = String(chunk)
+              output.push(text)
+              console.debug('[social-download] output', text.trim().slice(0, 500))
+              if (platform === 'instagram' && /Setting up session/i.test(text))
+                reportProgress(0, 'Connecting to Instagram…')
+              if (/Extracting URL/i.test(text)) reportProgress(0, 'Checking media address…')
+              if (/Downloading webpage/i.test(text)) reportProgress(0, 'Loading video page…')
+              if (/Downloading .*API JSON/i.test(text))
+                reportProgress(0, 'Reading video information…')
+              if (/Solving JS challenges/i.test(text)) reportProgress(0, 'Resolving YouTube media…')
+              if (/Downloading \d+ format/i.test(text))
+                reportProgress(0, 'Starting media transfer…')
+              const pathMatch = text.match(/FINAL_PATH:([^\r\n]+)/)
+              if (pathMatch?.[1]) finalPath = pathMatch[1].trim()
+              progressBuffer += text
+              const progressPattern = /PROGRESS:(\d+):([^:\r\n]+):\s*([\d.]+)%/g
+              let match: RegExpExecArray | null
+              let consumed = 0
+              while ((match = progressPattern.exec(progressBuffer))) {
+                consumed = progressPattern.lastIndex
+                reportProgress(Number(match[3]), 'Downloading media (current stream)…')
+              }
+              if (
+                /Merging formats|Fixing MPEG-TS/i.test(progressBuffer) &&
+                !event.sender.isDestroyed()
+              )
+                reportProgress(0, 'Merging video and audio…')
+              progressBuffer = consumed
+                ? progressBuffer.slice(consumed)
+                : progressBuffer.slice(-256)
+            }
+            downloaderProcess.stdout.on('data', consumeOutput)
+            downloaderProcess.stderr.on('data', consumeOutput)
+            const cancelDownload = () => downloaderProcess.kill()
+            event.sender.once('destroyed', cancelDownload)
+            downloaderProcess.once('error', (error) => {
+              console.error('[social-download] process error', error)
+              failedToStart = true
+              resolve({
+                ok: false,
+                error: error.message.includes('ENOENT')
+                  ? 'The bundled yt-dlp executable could not be found.'
+                  : error.message,
+              })
+            })
+            downloaderProcess.once('close', (code) => {
+              event.sender.removeListener('destroyed', cancelDownload)
+              console.info('[social-download] process closed', {
+                senderId: event.sender.id,
+                code,
+                finalPath,
+              })
+              if (failedToStart) return
+              const lines = output.join('').trim().split(/\r?\n/).filter(Boolean)
+              if (code === 0) {
+                if (!event.sender.isDestroyed())
+                  socialFilesByWebContents.set(event.sender.id, finalPath || destination)
+                reportProgress(100, 'Download complete')
+                resolve({ ok: true, filePath: finalPath || destination })
+              } else {
+                const details = lines.slice(-3).join('\n') || `yt-dlp exited with code ${code}`
+                const certificateFailed = hasCertificateError(output.join(''))
+                const networkUnavailable =
+                  /Network is unreachable|No route to host|Network is down/i.test(details)
+                const connectionTimedOut =
+                  /Connection timed out|connect timeout|curl: \(28\)/i.test(details)
+                resolve({
+                  ok: false,
+                  error: certificateFailed
+                    ? 'The HTTPS certificate could not be verified. The downloader uses your system trust store. If your VPN/proxy inspects HTTPS, install its CA through your operating system’s trusted certificate settings, or try a connection without HTTPS inspection. If SSL_CERT_FILE or SSL_CERT_DIR is set, check that it points to the correct trust store. Retrying alone will not fix this certificate error.'
+                    : connectionTimedOut
+                      ? `Connection to ${platform === 'instagram' ? 'Instagram' : 'YouTube'} timed out before the download could finish. Enter the HTTP/SOCKS proxy address from your VPN app in the Proxy field, or enable its system-wide VPN mode, then retry.`
+                      : networkUnavailable
+                        ? `Cannot connect to ${platform === 'instagram' ? 'Instagram' : 'YouTube'}: the network is unreachable. Check your internet connection and VPN/proxy, then retry. No file was downloaded.`
+                        : details,
+                })
+              }
+            })
+          })
+          if (
+            platform === 'youtube' &&
+            !result.ok &&
+            /sign in to confirm|login required|use --cookies/i.test(result.error)
+          ) {
+            if (authenticatedRetry)
+              return {
+                ok: false,
+                error:
+                  'YouTube still requires verification after sign-in. Try another VPN/proxy connection or refresh your YouTube session. Cookies do not guarantee access.',
+              }
+            socialProgressByWebContents.set(event.sender.id, {
+              percent: 0,
+              status:
+                'Sign in to YouTube in the opened window; download will resume automatically…',
+            })
+            try {
+              await signInToYouTube(
+                event.sender,
+                explicitProxy ||
+                  systemProxy ||
+                  process.env.https_proxy ||
+                  process.env.HTTPS_PROXY ||
+                  process.env.all_proxy ||
+                  process.env.ALL_PROXY ||
+                  process.env.http_proxy ||
+                  process.env.HTTP_PROXY,
+              )
+            } catch (error) {
+              if (event.sender.isDestroyed()) throw error
+              const choice = await dialog.showMessageBox({
+                type: 'info',
+                title: 'Use your browser’s YouTube sign-in',
+                message: 'Sign-in was closed or could not complete.',
+                detail:
+                  'If Google blocked the sign-in window, sign in to YouTube in Firefox or Chrome and confirm the video plays. Choose that browser below to let yt-dlp read its cookies and retry automatically. Close the browser first if cookie access fails.',
+                buttons: ['Use Firefox cookies', 'Use Chrome cookies', 'Cancel'],
+                defaultId: 2,
+                cancelId: 2,
+              })
+              if (choice.response === 2) throw error
+              browserCookies = choice.response === 0 ? 'firefox' : 'chrome'
+            }
+            return await runDownload(true)
+          }
+          return result
+        } finally {
+          await cookieFile?.cleanup()
+        }
+      }
+      try {
+        return await runDownload()
+      } catch (error) {
+        return {
+          ok: false as const,
+          error: error instanceof Error ? error.message : 'YouTube sign-in failed.',
+        }
+      }
     },
   )
   ipcMain.removeHandler(IPC.startNow)

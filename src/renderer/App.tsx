@@ -15,6 +15,7 @@ import {
   FolderOpen,
   Globe2,
   HardDriveDownload,
+  Instagram,
   Link2,
   ListStart,
   Music2,
@@ -23,6 +24,7 @@ import {
   Square,
   Trash2,
   Video,
+  Youtube,
   X,
 } from 'lucide-react'
 import type {
@@ -61,10 +63,12 @@ export function App() {
   if (id) return <ProgressWindow id={id} />
   if (listDialog === 'import' || listDialog === 'export')
     return <ListDialogWindow mode={listDialog} params={params} />
-  if (['add', 'scheduler', 'options', 'delete'].includes(utilityDialog ?? ''))
+  if (
+    ['add', 'scheduler', 'options', 'delete', 'youtube', 'instagram'].includes(utilityDialog ?? '')
+  )
     return (
       <UtilityDialogWindow
-        mode={utilityDialog as 'add' | 'scheduler' | 'options' | 'delete'}
+        mode={utilityDialog as 'add' | 'scheduler' | 'options' | 'delete' | 'youtube' | 'instagram'}
         params={params}
       />
     )
@@ -75,7 +79,7 @@ function UtilityDialogWindow({
   mode,
   params,
 }: {
-  mode: 'add' | 'scheduler' | 'options' | 'delete'
+  mode: 'add' | 'scheduler' | 'options' | 'delete' | 'youtube' | 'instagram'
   params: URLSearchParams
 }) {
   const [queues, setQueues] = useState<DownloadQueue[]>([])
@@ -85,6 +89,7 @@ function UtilityDialogWindow({
     window.downloads.listQueues().then(setQueues)
     window.downloads.getSegmentCount().then(setSegmentCount)
   }, [])
+  if (mode === 'youtube' || mode === 'instagram') return <SocialDownloadWindow platform={mode} />
   if (mode === 'add')
     return (
       <AddDownloadWindow queues={queues} segmentCount={segmentCount} initialQueue={initialQueue} />
@@ -128,6 +133,176 @@ function UtilityDialogWindow({
       </div>
     )
   return <DeleteFilesWindow ids={params.get('ids')?.split(',').filter(Boolean) ?? []} />
+}
+
+function SocialDownloadWindow({ platform }: { platform: 'youtube' | 'instagram' }) {
+  const [url, setUrl] = useState('')
+  const [proxyUrl, setProxyUrl] = useState('')
+  const [completed, setCompleted] = useState(false)
+  const [statusMessage, setStatusMessage] = useState('')
+  const [downloading, setDownloading] = useState(false)
+  const [allowInvalidCertificate, setAllowInvalidCertificate] = useState(false)
+  const [progress, setProgress] = useState({ percent: 0, status: '' })
+  const label = platform === 'youtube' ? 'YouTube' : 'Instagram'
+  const Icon = platform === 'youtube' ? Youtube : Instagram
+  useEffect(() => window.downloads.onSocialProgress(setProgress), [])
+  useEffect(() => {
+    if (!downloading) return
+    let active = true
+    const refresh = () =>
+      window.downloads
+        .getSocialProgress()
+        .then((value) => active && setProgress(value))
+        .catch(() => undefined)
+    refresh()
+    const timer = window.setInterval(refresh, 250)
+    return () => {
+      active = false
+      window.clearInterval(timer)
+    }
+  }, [downloading])
+  const download = async () => {
+    setCompleted(false)
+    setDownloading(true)
+    setProgress({ percent: 0, status: 'Connecting…' })
+    setStatusMessage('Resolving available media and downloading…')
+    try {
+      const result = await window.downloads.downloadSocial(
+        platform,
+        url.trim(),
+        allowInvalidCertificate,
+        proxyUrl.trim(),
+      )
+      setCompleted(result.ok)
+      setStatusMessage(result.ok ? `Saved to ${result.filePath}` : result.error)
+    } catch (reason) {
+      setStatusMessage(
+        reason instanceof Error ? reason.message : `Unable to download from ${label}.`,
+      )
+    } finally {
+      setDownloading(false)
+    }
+  }
+  return (
+    <div className={`native-dialog-host social-window ${platform}`}>
+      <div className="window-dialog social-dialog">
+        <div className="dialog-title">
+          Download from {label}
+          <button onClick={() => window.close()}>×</button>
+        </div>
+        <div className="social-body">
+          <Icon />
+          <div>
+            <h2>{label} media downloader</h2>
+            <p>
+              {platform === 'instagram'
+                ? 'Open a video or reel on Instagram, then copy and paste its link.'
+                : 'Paste a video URL. If needed, sign in once in the window that opens; downloading resumes automatically.'}
+            </p>
+          </div>
+          {platform === 'youtube' && (
+            <small>
+              <button
+                disabled={downloading}
+                onClick={async () => {
+                  try {
+                    await window.downloads.forgetYouTubeSession()
+                    setStatusMessage('Saved YouTube sign-in removed.')
+                  } catch (error) {
+                    setStatusMessage(
+                      error instanceof Error ? error.message : 'Could not remove sign-in.',
+                    )
+                  }
+                }}
+              >
+                Forget YouTube sign-in
+              </button>
+            </small>
+          )}
+          <label htmlFor="social-url">Media address</label>
+          <input
+            id="social-url"
+            autoFocus
+            placeholder={`https://${platform === 'youtube' ? 'youtube.com/watch?v=…' : 'instagram.com/reel/…'}`}
+            value={url}
+            disabled={downloading}
+            onChange={(event) => {
+              setUrl(event.target.value)
+              setCompleted(false)
+              setStatusMessage('')
+            }}
+          />
+          <small>
+            Download only media you own or have permission to save. Private, paid, and DRM-protected
+            content is not bypassed.
+          </small>
+          <label htmlFor="social-proxy">Proxy (optional)</label>
+          <input
+            id="social-proxy"
+            value={proxyUrl}
+            disabled={downloading}
+            placeholder="http://127.0.0.1:PORT or socks5://127.0.0.1:PORT"
+            onChange={(event) => setProxyUrl(event.target.value)}
+            autoComplete="off"
+            spellCheck={false}
+          />
+          <small>
+            Use the address and port shown in your VPN app. Leave blank for automatic settings.
+          </small>
+          <label className="social-certificate-option">
+            <input
+              type="checkbox"
+              checked={allowInvalidCertificate}
+              onChange={(event) => setAllowInvalidCertificate(event.target.checked)}
+            />
+            Allow untrusted certificates (less secure; use only if normal downloads report a
+            certificate error)
+          </label>
+          {!downloading && statusMessage && <div className="social-status">{statusMessage}</div>}
+          {downloading && (
+            <div className="social-progress">
+              <div>
+                <span>{progress.status}</span>
+                <b>{progress.percent > 0 ? `${progress.percent.toFixed(0)}%` : 'Please wait'}</b>
+              </div>
+              {progress.percent > 0 ? (
+                <progress max="100" value={progress.percent} />
+              ) : (
+                <progress />
+              )}
+            </div>
+          )}
+        </div>
+        <div className="dialog-actions">
+          {completed ? (
+            <>
+              <button
+                className="primary"
+                onClick={async () => {
+                  try {
+                    const error = await window.downloads.openSocialFile()
+                    if (error) setStatusMessage(error)
+                  } catch (reason) {
+                    setStatusMessage(
+                      reason instanceof Error ? reason.message : 'Unable to open file.',
+                    )
+                  }
+                }}
+              >
+                Open
+              </button>
+              <button onClick={() => window.downloads.showSocialFileInFolder()}>Open Folder</button>
+            </>
+          ) : (
+            <button className="primary" disabled={!url.trim() || downloading} onClick={download}>
+              {downloading ? 'Downloading…' : 'Download'}
+            </button>
+          )}
+          <button onClick={() => window.close()}>Close</button>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 function DeleteFilesWindow({ ids }: { ids: string[] }) {
@@ -922,6 +1097,21 @@ function MainApp() {
           }}
         />
         <Tool icon={<Globe2 />} label="Grabber" color="blue" />
+        <span className="separator social-separator" aria-hidden="true" />
+        <Tool
+          icon={<Instagram />}
+          label="Instagram"
+          color="pink"
+          title="Download permitted media from Instagram"
+          onClick={() => window.downloads.showUtilityWindow('instagram')}
+        />
+        <Tool
+          icon={<Youtube />}
+          label="YouTube"
+          color="red"
+          title="Download permitted media from YouTube"
+          onClick={() => window.downloads.showUtilityWindow('youtube')}
+        />
       </div>
       <div
         className="workspace"

@@ -41,3 +41,11 @@ npm run dev
 - `src/shared`: cross-process DTOs and channels
 
 This milestone supports direct HTTP/HTTPS downloads, live progress, pause/resume, cancellation, filtering, and opening the native download directory. Persistence, segmented downloads, queues, browser integration, checksums, scheduling, and recovery are planned as separate modules.
+
+## YouTube sign-in
+
+When YouTube requests authentication, the downloader opens a separate Google sign-in window. Complete sign-in yourself; after returning to YouTube, the window closes and the download retries once automatically. Later YouTube downloads reuse that dedicated session. Instagram and direct downloads do not use it.
+
+The sign-in page has no app preload or Node access. Only YouTube-domain cookies are exported to a temporary private file for yt-dlp, deleted when the attempt ends. The persistent Electron session remains in app data. Use **Forget YouTube sign-in** in the downloader to remove the app’s saved YouTube session. This does not sign you out of Firefox or Chrome.
+
+If Google refuses embedded sign-in, close the sign-in window and choose Firefox or Chrome in the fallback dialog after signing in there. Browser cookies are read only after you choose that option. Login, two-factor authentication, and verification must be completed by you; cookies do not guarantee that YouTube will accept the network connection. See [yt-dlp’s cookie guidance](https://github.com/yt-dlp/yt-dlp/wiki/Extractors#exporting-youtube-cookies).
