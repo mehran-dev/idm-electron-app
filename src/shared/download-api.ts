@@ -14,6 +14,7 @@ export const IPC = {
   showListWindow: 'downloads:show-list-window',
   showUtilityWindow: 'downloads:show-utility-window',
   downloadSocial: 'downloads:download-social',
+  forgetYouTubeSession: 'downloads:forget-youtube-session',
   openSocialFile: 'downloads:open-social-file',
   showSocialFileInFolder: 'downloads:show-social-file-in-folder',
   socialProgress: 'downloads:social-progress',
@@ -60,6 +61,7 @@ export interface DownloadApi {
     ids?: string[],
     queueId?: string,
   ): Promise<void>
+  forgetYouTubeSession(): Promise<void>
   downloadSocial(
     platform: 'youtube' | 'instagram',
     url: string,

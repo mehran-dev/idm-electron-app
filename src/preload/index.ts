@@ -10,6 +10,7 @@ const api: DownloadApi = {
     ipcRenderer.invoke(IPC.showListWindow, mode, ids, queueId),
   showUtilityWindow: (mode, ids = [], queueId) =>
     ipcRenderer.invoke(IPC.showUtilityWindow, mode, ids, queueId),
+  forgetYouTubeSession: () => ipcRenderer.invoke(IPC.forgetYouTubeSession),
   downloadSocial: (platform, url, allowInvalidCertificate, proxyUrl) =>
     ipcRenderer.invoke(IPC.downloadSocial, platform, url, allowInvalidCertificate, proxyUrl),
   openSocialFile: () => ipcRenderer.invoke(IPC.openSocialFile),

@@ -197,9 +197,28 @@ function SocialDownloadWindow({ platform }: { platform: 'youtube' | 'instagram' 
             <p>
               {platform === 'instagram'
                 ? 'Open a video or reel on Instagram, then copy and paste its link.'
-                : 'Paste a public post, reel, or video URL.'}
+                : 'Paste a video URL. If needed, sign in once in the window that opens; downloading resumes automatically.'}
             </p>
           </div>
+          {platform === 'youtube' && (
+            <small>
+              <button
+                disabled={downloading}
+                onClick={async () => {
+                  try {
+                    await window.downloads.forgetYouTubeSession()
+                    setStatusMessage('Saved YouTube sign-in removed.')
+                  } catch (error) {
+                    setStatusMessage(
+                      error instanceof Error ? error.message : 'Could not remove sign-in.',
+                    )
+                  }
+                }}
+              >
+                Forget YouTube sign-in
+              </button>
+            </small>
+          )}
           <label htmlFor="social-url">Media address</label>
           <input
             id="social-url"
