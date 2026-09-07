@@ -803,7 +803,7 @@ legend {
   height: 100vh;
   max-width: none;
   max-height: none;
-  border: 0;
+  border: 1px solid #888;
   box-shadow: none;
 }
 .native-dialog-host > .dialog {
@@ -956,4 +956,19 @@ legend {
 .dialog select {
   height: 24px;
   margin-left: 5px;
+}
+
+/* The frame owns the viewport; the form is measured independently for resizing. */
+body:has(.address-dialog-host) {
+  overflow: hidden;
+}
+.address-dialog-host {
+  position: fixed;
+  inset: 0;
+  min-height: 0;
+  border: 1px solid #888;
+  overflow: hidden;
+}
+.address-dialog-host > .file-info-dialog {
+  border: 0;
 }

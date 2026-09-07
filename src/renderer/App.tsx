@@ -190,7 +190,8 @@ function AddDownloadWindow({
   useEffect(() => {
     const dialog = dialogElement.current
     if (!dialog) return
-    const fitWindowToContent = () => window.resizeTo(620, Math.max(170, dialog.scrollHeight))
+    const fitWindowToContent = () =>
+      window.resizeTo(620, Math.max(180, Math.ceil(dialog.getBoundingClientRect().height) + 2))
     const observer = new ResizeObserver(fitWindowToContent)
     observer.observe(dialog)
     fitWindowToContent()
@@ -249,7 +250,7 @@ function AddDownloadWindow({
       })
   }
   return (
-    <div className="native-dialog-host">
+    <div className="native-dialog-host address-dialog-host">
       <div ref={dialogElement} className="dialog file-info-dialog">
         <div className="dialog-title">
           Enter new address to download<button onClick={() => window.close()}>×</button>

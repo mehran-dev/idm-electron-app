@@ -61,6 +61,7 @@
   gap: 9px;
 }
 .progress-window-root {
+  border: 1px solid #888;
   width: 100vw;
   height: 100vh;
   min-width: 0;
