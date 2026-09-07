@@ -7,6 +7,7 @@ import type {
   ImportResult,
 } from './download-models'
 export const IPC = {
+  windowAction: 'window:action',
   list: 'downloads:list',
   inspect: 'downloads:inspect',
   chooseSavePath: 'downloads:choose-save-path',
@@ -50,6 +51,7 @@ export const IPC = {
   getCompletionSound: 'settings:get-completion-sound',
 } as const
 export interface DownloadApi {
+  windowAction(action: 'minimize' | 'maximize' | 'close'): Promise<void>
   version: number
   list(): Promise<DownloadItem[]>
   inspect(url: string): Promise<DownloadPreview>

@@ -89,6 +89,15 @@ export function registerDownloadDialogHandlers(
   service: DownloadService,
   showProgress: (id: string) => void,
 ) {
+  ipcMain.handle(IPC.windowAction, (event, action: string) => {
+    const window = BrowserWindow.fromWebContents(event.sender)
+    if (!window) return
+    if (action === 'minimize') window.minimize()
+    else if (action === 'maximize') {
+      if (window.isMaximized()) window.unmaximize()
+      else window.maximize()
+    } else if (action === 'close') window.close()
+  })
   ipcMain.handle(IPC.forgetYouTubeSession, () => forgetYouTubeSession())
   ipcMain.handle(IPC.openSocialFile, async (event) => {
     const path = socialFilesByWebContents.get(event.sender.id)

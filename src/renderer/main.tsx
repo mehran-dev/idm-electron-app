@@ -7,6 +7,7 @@ import './completion.css'
 import './completed-download.css'
 import './sorting.css'
 import './segmented-progress.css'
+import './modern-ui.css'
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <App />

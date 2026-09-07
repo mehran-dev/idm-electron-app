@@ -67,10 +67,10 @@ function createWindow() {
   const window = new BrowserWindow({
     width: 1240,
     height: 780,
-    minWidth: 900,
+    minWidth: 940,
     minHeight: 600,
-    backgroundColor: '#0b1020',
-    titleBarStyle: 'hiddenInset',
+    backgroundColor: '#f3f6f8',
+    frame: false,
     webPreferences: {
       preload: join(__dirname, '../preload/index.cjs'),
       contextIsolation: true,

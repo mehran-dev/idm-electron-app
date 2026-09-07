@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Archive,
+  Search,
+  Plus,
+  ArrowDownToLine,
   CalendarClock,
   CheckCircle2,
   ChevronDown,
@@ -16,7 +19,6 @@ import {
   Globe2,
   HardDriveDownload,
   Instagram,
-  Link2,
   ListStart,
   Music2,
   Play,
@@ -365,8 +367,10 @@ function AddDownloadWindow({
   useEffect(() => {
     const dialog = dialogElement.current
     if (!dialog) return
-    const fitWindowToContent = () =>
-      window.resizeTo(620, Math.max(180, Math.ceil(dialog.getBoundingClientRect().height) + 2))
+    const fitWindowToContent = () => {
+      const height = Math.max(180, Math.ceil(dialog.getBoundingClientRect().height) + 2)
+      if (Math.abs(window.innerHeight - height) > 1) window.resizeTo(620, height)
+    }
     const observer = new ResizeObserver(fitWindowToContent)
     observer.observe(dialog)
     fitWindowToContent()
@@ -428,7 +432,7 @@ function AddDownloadWindow({
     <div className="native-dialog-host address-dialog-host">
       <div ref={dialogElement} className="dialog file-info-dialog">
         <div className="dialog-title">
-          Enter new address to download<button onClick={() => window.close()}>×</button>
+          New download<button onClick={() => window.close()}>×</button>
         </div>
         <div className="dialog-body">
           <div className="url-row">
@@ -758,6 +762,7 @@ function CompletedDownload({ item }: { item: DownloadItem }) {
   )
 }
 function MainApp() {
+  const [searchQuery, setSearchQuery] = useState('')
   const importDrag = useDialogDrag()
   const exportDrag = useDialogDrag()
   const [items, setItems] = useState<DownloadItem[]>([]),
@@ -837,8 +842,13 @@ function MainApp() {
     }
   }, [dialog, url])
   const visible = useMemo(
-    () => items.filter((item) => matchesCategory(item, category)),
-    [items, category],
+    () =>
+      items.filter(
+        (item) =>
+          matchesCategory(item, category) &&
+          item.fileName.toLowerCase().includes(searchQuery.trim().toLowerCase()),
+      ),
+    [items, category, searchQuery],
   )
   const selectedItems = items.filter((item) => selectedIds.has(item.id)),
     current = selectedItems[0]
@@ -934,12 +944,29 @@ function MainApp() {
     <div className="idm-app">
       <div className="titlebar">
         <span>
-          <HardDriveDownload size={16} /> Internet Download Manager
+          <HardDriveDownload size={20} /> <b>NEXUS</b>
+          <span className="brand-caption">Download manager</span>
         </span>
         <div>
-          <button>—</button>
-          <button>□</button>
-          <button className="close">×</button>
+          <button
+            aria-label="Minimize window"
+            onClick={() => window.downloads.windowAction('minimize')}
+          >
+            —
+          </button>
+          <button
+            aria-label="Maximize or restore window"
+            onClick={() => window.downloads.windowAction('maximize')}
+          >
+            □
+          </button>
+          <button
+            className="close"
+            aria-label="Close window"
+            onClick={() => window.downloads.windowAction('close')}
+          >
+            ×
+          </button>
         </div>
       </div>
       <div className="menubar">
@@ -974,17 +1001,14 @@ function MainApp() {
             </div>
           )}
         </div>
-        <button>File</button>
-        <button>Downloads</button>
-        <button>View</button>
-        <button>Help</button>
-        <button>Donate</button>
+        <button onClick={() => window.downloads.openFolder()}>Open downloads folder</button>
+        <button onClick={() => window.downloads.showUtilityWindow('options')}>Preferences</button>
       </div>
-      <div className="toolbar">
+      <div className="toolbar" role="toolbar" aria-label="Download actions">
         <Tool
-          icon={<Link2 />}
-          label="Add URL"
-          color="blue"
+          icon={<Plus />}
+          label="New download"
+          color="primary-tool"
           onClick={() => window.downloads.showUtilityWindow('add', [], selectedQueue)}
         />
         <Tool
@@ -1053,14 +1077,8 @@ function MainApp() {
         />
         <span className="separator" />
         <Tool
-          icon={<Settings />}
-          label="Options"
-          color="blue"
-          onClick={() => window.downloads.showUtilityWindow('options')}
-        />
-        <Tool
           icon={<CalendarClock />}
-          label="Scheduler"
+          label="Queues"
           color="orange"
           onClick={() => window.downloads.showUtilityWindow('scheduler', [], selectedQueue)}
         />
@@ -1096,7 +1114,7 @@ function MainApp() {
             window.downloads.showListWindow('export', [...selectedIds], selectedQueue)
           }}
         />
-        <Tool icon={<Globe2 />} label="Grabber" color="blue" />
+
         <span className="separator social-separator" aria-hidden="true" />
         <Tool
           icon={<Instagram />}
@@ -1132,17 +1150,51 @@ function MainApp() {
           onEdit={openQueueManager}
           onDelete={openQueueManager}
         />
-        <DownloadTable
-          items={visible}
-          selected={selectedIds}
-          onSelect={selectRow}
-          onOpen={(id) => window.downloads.showProgress(id)}
-          onContext={(event, item) => {
-            event.preventDefault()
-            if (!selectedIds.has(item.id)) setSelectedIds(new Set([item.id]))
-            setContext({ x: event.clientX, y: event.clientY, item })
-          }}
-        />
+        <div className="library-panel">
+          <div className="library-heading">
+            <div>
+              <h2>
+                {category.startsWith('queue:')
+                  ? (queues.find((q) => q.id === category.slice(6))?.name ?? 'Queue')
+                  : ({
+                      all: 'All downloads',
+                      unfinished: 'In progress',
+                      finished: 'Completed',
+                      video: 'Videos',
+                      music: 'Music',
+                      programs: 'Applications',
+                      documents: 'Documents',
+                      compressed: 'Archives',
+                      queues: 'Download queues',
+                    }[category as string] ?? 'Downloads')}
+              </h2>
+              <span>
+                {visible.length} files{selectedIds.size ? ` · ${selectedIds.size} selected` : ''}
+              </span>
+            </div>
+            <label className="download-search">
+              <Search size={17} />
+              <input
+                type="search"
+                aria-label="Search downloads"
+                placeholder="Search files…"
+                value={searchQuery}
+                onChange={(event) => setSearchQuery(event.target.value)}
+              />
+            </label>
+          </div>
+          <DownloadTable
+            items={visible}
+            selected={selectedIds}
+            onSelect={selectRow}
+            onOpen={(id) => window.downloads.showProgress(id)}
+            onContext={(event, item) => {
+              event.preventDefault()
+              if (!selectedIds.has(item.id)) setSelectedIds(new Set([item.id]))
+              setContext({ x: event.clientX, y: event.clientY, item })
+            }}
+          />
+        </div>
       </div>
       <div className="statusbar">
         <span>{items.filter((i) => i.status === 'completed').length} completed</span>
@@ -1159,7 +1211,7 @@ function MainApp() {
         <div className="dialog-shade" onMouseDown={() => setDialog(false)}>
           <div className="dialog file-info-dialog" onMouseDown={(e) => e.stopPropagation()}>
             <div className="dialog-title">
-              Enter new address to download<button onClick={() => setDialog(false)}>×</button>
+              New download<button onClick={() => setDialog(false)}>×</button>
             </div>
             <div className="dialog-body">
               <div className="url-row">
@@ -1522,6 +1574,15 @@ function SchedulerDialog({
     ),
     [message, setMessage] = useState('')
   const queue = queues.find((q) => q.id === queueId)
+  useEffect(() => {
+    if (!queueId && queues[0]) setQueueId(queues[0].id)
+  }, [queueId, queues])
+  useEffect(() => {
+    if (queue) {
+      setName(queue.name)
+      setConcurrency(queue.concurrency)
+    }
+  }, [queue?.id, queue?.name, queue?.concurrency])
   function select(id: string) {
     const value = queues.find((q) => q.id === id)
     setQueueId(id)
@@ -1558,7 +1619,7 @@ function SchedulerDialog({
     <div className="dialog-shade">
       <div className="window-dialog scheduler-dialog">
         <div className="dialog-title">
-          Scheduler<button onClick={onClose}>×</button>
+          Download queues<button onClick={onClose}>×</button>
         </div>
         <div className="scheduler-layout">
           <aside>
@@ -1593,9 +1654,10 @@ function SchedulerDialog({
             ))}
           </aside>
           <section>
-            <div className="schedule-tabs">
-              <button className="active">Schedule</button>
-              <button>Files in the queue</button>
+            <div className="queue-intro">
+              <span className="eyebrow">DOWNLOAD ORGANIZATION</span>
+              <h2>Set your own pace.</h2>
+              <p>Group downloads and choose how many files run together.</p>
             </div>
             <fieldset>
               <legend>Queue settings</legend>
@@ -1615,37 +1677,13 @@ function SchedulerDialog({
               </label>
               {message && <p className="queue-message">{message}</p>}
             </fieldset>
-            <fieldset>
-              <legend>Schedule</legend>
-              <label className="check">
-                <input type="checkbox" /> Start download at{' '}
-                <input type="time" defaultValue="09:00" />
-              </label>
-              <div className="weekdays">
-                {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day) => (
-                  <label key={day}>
-                    <input type="checkbox" defaultChecked />
-                    {day}
-                  </label>
-                ))}
-              </div>
-              <label className="check">
-                <input type="checkbox" /> Stop download at{' '}
-                <input type="time" defaultValue="18:00" />
-              </label>
-            </fieldset>
-            <fieldset>
-              <legend>When done</legend>
-              <label className="check">
-                <input type="checkbox" /> Hang up modem when done
-              </label>
-              <label className="check">
-                <input type="checkbox" /> Exit Internet Download Manager when done
-              </label>
-              <label className="check">
-                <input type="checkbox" /> Turn off computer when done
-              </label>
-            </fieldset>
+            <div className="preference-note">
+              <ListStart size={20} />
+              <p>
+                Add files with “Download later”, then select the queue in your library and choose
+                “Start queue”.
+              </p>
+            </div>
           </section>
         </div>
         <div className="dialog-actions">
@@ -1669,122 +1707,73 @@ function OptionsDialog({
   onSave: (value: number) => void
   onClose: () => void
 }) {
-  const tabs = [
-    'General',
-    'File types',
-    'Save to',
-    'Downloads',
-    'Connection',
-    'Proxy / Socks',
-    'Site Logins',
-    'Dial-Up',
-    'Sounds',
-  ]
-  const [tab, setTab] = useState('General'),
-    [segments, setSegments] = useState(segmentCount)
+  const [segments, setSegments] = useState(segmentCount)
+  useEffect(() => setSegments(segmentCount), [segmentCount])
   return (
     <div className="dialog-shade">
       <div className="window-dialog options-dialog">
         <div className="dialog-title">
-          Internet Download Manager Configuration<button onClick={onClose}>×</button>
+          Preferences
+          <button aria-label="Close preferences" onClick={onClose}>
+            ×
+          </button>
         </div>
-        <div className="option-tabs">
-          {tabs.map((name) => (
-            <button
-              className={tab === name ? 'active' : ''}
-              onClick={() => setTab(name)}
-              key={name}
+        <div className="preferences-content">
+          <div className="preferences-intro">
+            <span className="metric-icon complete">
+              <Settings size={23} />
+            </span>
+            <div>
+              <h2>Make yourself at home.</h2>
+              <p>A few thoughtful defaults for your next download.</p>
+            </div>
+          </div>
+          <section className="preference-card">
+            <h3>Download connections</h3>
+            <p>
+              Choose how many connections a new download can use. Servers that don’t support
+              multiple connections use one automatically.
+            </p>
+            <label htmlFor="default-connections">Connections per download</label>
+            <select
+              id="default-connections"
+              value={segments}
+              onChange={(event) => setSegments(Number(event.target.value))}
             >
-              <Settings />
-              {name}
+              {Array.from({ length: 8 }, (_, index) => index + 1).map((value) => (
+                <option key={value} value={value}>
+                  {value} {value === 1 ? 'connection' : 'connections'}
+                  {value === 4 ? ' · Recommended default' : ''}
+                </option>
+              ))}
+            </select>
+            <small>
+              Use fewer connections if your network is unstable. This setting applies to new
+              downloads.
+            </small>
+          </section>
+          <section className="preference-card preference-folder">
+            <div>
+              <h3>Your download folder</h3>
+              <p>You can choose a different destination when adding each file.</p>
+            </div>
+            <button onClick={() => window.downloads.openFolder()}>
+              <FolderOpen size={17} /> Open folder
             </button>
-          ))}
-        </div>
-        <div className="option-page">
-          <h3>{tab}</h3>
-          {tab === 'Connection' ? (
-            <>
-              <fieldset>
-                <legend>Connection type / speed</legend>
-                <label>
-                  Connection type/speed{' '}
-                  <select defaultValue="high">
-                    <option value="high">High speed: Direct connection</option>
-                    <option>Medium speed</option>
-                    <option>Low speed</option>
-                  </select>
-                </label>
-              </fieldset>
-              <fieldset>
-                <legend>Max. connections number</legend>
-                <label>
-                  Default max. conn. number{' '}
-                  <select value={segments} onChange={(e) => setSegments(Number(e.target.value))}>
-                    {Array.from({ length: 8 }, (_, index) => index + 1).map((value) => (
-                      <option value={value} key={value}>
-                        {value}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <p>
-                  Each new download will use up to {segments} parallel file segments when the server
-                  supports byte ranges.
-                </p>
-              </fieldset>
-            </>
-          ) : tab === 'General' ? (
-            <>
-              <fieldset>
-                <legend>Integrate IDM into browsers</legend>
-                <label className="check">
-                  <input type="checkbox" defaultChecked /> Launch Internet Download Manager on
-                  startup
-                </label>
-                <label className="check">
-                  <input type="checkbox" defaultChecked /> Use advanced browser integration
-                </label>
-                <div className="browser-list">
-                  <label>
-                    <input type="checkbox" defaultChecked /> Microsoft Edge
-                  </label>
-                  <label>
-                    <input type="checkbox" defaultChecked /> Google Chrome
-                  </label>
-                  <label>
-                    <input type="checkbox" defaultChecked /> Firefox
-                  </label>
-                  <label>
-                    <input type="checkbox" /> Opera
-                  </label>
-                </div>
-              </fieldset>
-              <fieldset>
-                <legend>Customize IDM menu items in context menu of browsers</legend>
-                <button>Edit...</button>
-              </fieldset>
-            </>
-          ) : (
-            <>
-              <p>Configure {tab.toLowerCase()} preferences for the download manager.</p>
-              <fieldset>
-                <legend>{tab} settings</legend>
-                <label className="check">
-                  <input type="checkbox" /> Enable custom {tab.toLowerCase()} settings
-                </label>
-                <label>
-                  Default value <input />
-                </label>
-              </fieldset>
-            </>
-          )}
+          </section>
+          <div className="preference-note">
+            <CheckCircle2 size={18} />
+            <p>
+              Completion sounds, notifications, and other actions can be set in each download’s
+              progress window.
+            </p>
+          </div>
         </div>
         <div className="dialog-actions">
-          <button className="primary" onClick={() => onSave(segments)}>
-            OK
-          </button>
           <button onClick={onClose}>Cancel</button>
-          <button disabled>Help</button>
+          <button className="primary" onClick={() => onSave(segments)}>
+            Save preferences
+          </button>
         </div>
       </div>
     </div>
@@ -1838,7 +1827,9 @@ function DownloadProgress({ item, onClose }: { item: DownloadItem; onClose: () =
               <label>URL:</label>
               <span title={item.url}>{item.url}</span>
               <label>Status:</label>
-              <span>{status(item)}</span>
+              <span>
+                <em className={`download-status status-${item.status}`}>{status(item)}</em>
+              </span>
               <label>File size:</label>
               <span>{formatBytes(item.totalBytes) || 'Unknown'}</span>
               <label>Downloaded:</label>
@@ -2014,7 +2005,12 @@ function Tool({
   onClick?: () => void
 }) {
   return (
-    <button className={`tool ${color}`} title={title} disabled={disabled} onClick={onClick}>
+    <button
+      className={`tool ${color}`}
+      title={title}
+      disabled={disabled || !onClick}
+      onClick={onClick}
+    >
       <span>{icon}</span>
       <small>{label}</small>
     </button>
@@ -2062,7 +2058,7 @@ function CategoryTree({
   return (
     <aside className="categories">
       <div className="pane-title">
-        Categories
+        Library
         <div>
           <button title="Add queue" onClick={onAdd}>
             ＋
@@ -2263,13 +2259,30 @@ function DownloadTable({
         </div>
         <div className="rows">
           {items.length === 0 ? (
-            <div className="no-downloads">There are no files in this category.</div>
+            <div className="no-downloads">
+              <span className="empty-icon">
+                <ArrowDownToLine size={32} />
+              </span>
+              <h3>A little space for your next download</h3>
+              <p>No files match this view. Add a download or try another search.</p>
+              <button
+                className="new-download"
+                onClick={() => window.downloads.showUtilityWindow('add')}
+              >
+                <Plus size={16} /> Add a download
+              </button>
+            </div>
           ) : (
             sortedItems.map((item) => (
               <div
                 className={`download-row ${selected.has(item.id) ? 'selected' : ''}`}
                 onClick={(event) => onSelect(event, item.id)}
                 onContextMenu={(event) => onContext(event, item)}
+                tabIndex={0}
+                aria-label={`${item.fileName}, ${status(item)}`}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') onOpen(item.id)
+                }}
                 onDoubleClick={() => onOpen(item.id)}
                 key={item.id}
                 style={{ gridTemplateColumns: gridColumns }}
@@ -2279,7 +2292,9 @@ function DownloadTable({
                   <b>{item.fileName}</b>
                 </span>
                 <span>{formatBytes(item.totalBytes)}</span>
-                <span>{status(item)}</span>
+                <span>
+                  <em className={`download-status status-${item.status}`}>{status(item)}</em>
+                </span>
                 <span>{timeLeft(item)}</span>
                 <span>{item.speed ? `${formatBytes(item.speed)}/sec` : ''}</span>
                 <span>{new Date(item.createdAt).toLocaleString()}</span>
