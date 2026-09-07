@@ -2,6 +2,10 @@ import { app, BrowserWindow, dialog, ipcMain, net, session, shell } from 'electr
 import { basename, join } from 'node:path'
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { spawn } from 'node:child_process'
+import {
+  socialDownloadEnvironment,
+  hasCertificateError,
+} from '../../infrastructure/social-download-environment'
 import { IPC, type DownloadPreview } from '../../../shared/download'
 import type { DownloadService } from '../../application/download-service'
 const socialProgressByWebContents = new Map<number, { percent: number; status: string }>()
@@ -291,8 +295,7 @@ export function registerDownloadDialogHandlers(
         'http_proxy',
         'HTTP_PROXY',
       ].some((key) => Boolean(process.env[key]))
-      // Preserve YouTube's existing yt-dlp routing unless a proxy is explicitly entered.
-      if (platform === 'instagram' && !explicitProxy && !hasEnvironmentProxy) {
+      if (!explicitProxy && !hasEnvironmentProxy) {
         try {
           const route = await event.sender.session.resolveProxy(url.href)
           const firstRoute = route.split(';')[0]?.trim() ?? ''
@@ -348,10 +351,16 @@ export function registerDownloadDialogHandlers(
           reportProgress(0, `Connecting to ${platform === 'youtube' ? 'YouTube' : 'Instagram'}…`)
           const args = [
             '--no-playlist',
+            '--socket-timeout',
+            '20',
+            '--retry-sleep',
+            'http:exp=1:4',
+            '--retry-sleep',
+            'extractor:exp=1:4',
             '--compat-options',
             'no-certifi',
             '--js-runtimes',
-            'node',
+            `node:${process.execPath}`,
             '--no-colors',
             '--newline',
             '--progress',
@@ -387,7 +396,7 @@ export function registerDownloadDialogHandlers(
           if (allowInvalidCertificate) args.unshift('--no-check-certificates')
           const downloaderProcess = spawn(executable, args, {
             stdio: ['ignore', 'pipe', 'pipe'],
-            env: { ...process.env, PYTHONUNBUFFERED: '1' },
+            env: socialDownloadEnvironment(process.env),
           })
           console.info('[social-download] spawned', {
             senderId: event.sender.id,
@@ -450,6 +459,7 @@ export function registerDownloadDialogHandlers(
               resolve({ ok: true, filePath: finalPath || destination })
             } else {
               const details = lines.slice(-3).join('\n') || `yt-dlp exited with code ${code}`
+              const certificateFailed = hasCertificateError(output.join(''))
               const networkUnavailable =
                 /Network is unreachable|No route to host|Network is down/i.test(details)
               const connectionTimedOut = /Connection timed out|connect timeout|curl: \(28\)/i.test(
@@ -457,11 +467,13 @@ export function registerDownloadDialogHandlers(
               )
               resolve({
                 ok: false,
-                error: connectionTimedOut
-                  ? `Connection to ${platform === 'instagram' ? 'Instagram' : 'YouTube'} timed out before the download could finish. Enter the HTTP/SOCKS proxy address from your VPN app in the Proxy field, or enable its system-wide VPN mode, then retry.`
-                  : networkUnavailable
-                    ? `Cannot connect to ${platform === 'instagram' ? 'Instagram' : 'YouTube'}: the network is unreachable. Check your internet connection and VPN/proxy, then retry. No file was downloaded.`
-                    : details,
+                error: certificateFailed
+                  ? 'The HTTPS certificate could not be verified. The downloader uses your system trust store. If your VPN/proxy inspects HTTPS, install its CA through your operating system’s trusted certificate settings, or try a connection without HTTPS inspection. If SSL_CERT_FILE or SSL_CERT_DIR is set, check that it points to the correct trust store. Retrying alone will not fix this certificate error.'
+                  : connectionTimedOut
+                    ? `Connection to ${platform === 'instagram' ? 'Instagram' : 'YouTube'} timed out before the download could finish. Enter the HTTP/SOCKS proxy address from your VPN app in the Proxy field, or enable its system-wide VPN mode, then retry.`
+                    : networkUnavailable
+                      ? `Cannot connect to ${platform === 'instagram' ? 'Instagram' : 'YouTube'}: the network is unreachable. Check your internet connection and VPN/proxy, then retry. No file was downloaded.`
+                      : details,
               })
             }
           })
