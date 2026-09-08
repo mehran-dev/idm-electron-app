@@ -1,3 +1,4 @@
+import { DuplicateNotice } from './features/add-download/DuplicateNotice'
 import { useContentWindowSize } from './hooks/useContentWindowSize'
 import { SocialHistoryWindow } from './features/social-history/SocialHistoryWindow'
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -405,13 +406,16 @@ function AddDownloadWindow({
   const [preview, setPreview] = useState<DownloadPreview>()
   const [error, setError] = useState('')
   const [inspecting, setInspecting] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
   const [segments, setSegments] = useState(segmentCount)
   const [queueId, setQueueId] = useState(initialQueue)
   useEffect(() => {
     if (!queueId && queues[0]) setQueueId(queues[0].id)
   }, [queues, queueId])
   useEffect(() => {
-    if (!url.trim()) return setPreview(undefined)
+    setInspecting(false)
+    setPreview(undefined)
+    if (!url.trim()) return
     try {
       const parsed = new URL(url.trim())
       if (!['http:', 'https:'].includes(parsed.protocol)) return
@@ -442,22 +446,35 @@ function AddDownloadWindow({
     }
   }, [url])
   const start = async (later: boolean) => {
-    if (!preview) return
-    const item = later
-      ? await window.downloads.enqueue(url.trim(), queueId, segments, preview.savePath)
-      : await window.downloads.add(url.trim(), false, undefined, segments, preview.savePath)
-    if (!later) await window.downloads.showProgress(item.id)
-    window.close()
+    if (!preview || submitting) return
+    setSubmitting(true)
+    setError('')
+    try {
+      const item = later
+        ? await window.downloads.enqueue(url.trim(), queueId, segments, preview.savePath)
+        : await window.downloads.add(url.trim(), false, undefined, segments, preview.savePath)
+      if (!item) return
+      if (!later) await window.downloads.showProgress(item.id)
+      window.close()
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Unable to add download')
+    } finally {
+      setSubmitting(false)
+    }
   }
   const browse = async () => {
     if (!preview) return
-    const path = await window.downloads.chooseSavePath(preview.savePath)
-    if (path)
-      setPreview({
-        ...preview,
-        savePath: path,
-        fileName: path.split(/[\\/]/).pop() || preview.fileName,
-      })
+    try {
+      const path = await window.downloads.chooseSavePath(preview.savePath)
+      if (path)
+        setPreview({
+          ...preview,
+          savePath: path,
+          fileName: path.split(/[\\/]/).pop() || preview.fileName,
+        })
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Unable to choose a destination')
+    }
   }
   return (
     <div className="native-dialog-host address-dialog-host">
@@ -484,6 +501,7 @@ function AddDownloadWindow({
           {error && <p className="dialog-error">{error}</p>}
           {preview && (
             <>
+              <DuplicateNotice preview={preview} />
               <div className="file-overview">
                 <FileIcon name={preview.fileName} />
                 <div>
@@ -498,7 +516,13 @@ function AddDownloadWindow({
                   Save As{' '}
                   <input
                     value={preview.savePath}
-                    onChange={(event) => setPreview({ ...preview, savePath: event.target.value })}
+                    onChange={(event) =>
+                      setPreview({
+                        ...preview,
+                        savePath: event.target.value,
+                        fileName: event.target.value.split(/[\\/]/).pop() || '',
+                      })
+                    }
                   />
                   <button onClick={browse}>…</button>
                 </label>
@@ -531,11 +555,15 @@ function AddDownloadWindow({
           )}
         </div>
         <div className="dialog-actions">
-          <button disabled={!preview || !queueId} onClick={() => start(true)}>
+          <button disabled={submitting || !preview || !queueId} onClick={() => start(true)}>
             Download Later
           </button>
-          <button className="primary" disabled={!preview} onClick={() => start(false)}>
-            Start Download
+          <button
+            className="primary"
+            disabled={submitting || !preview}
+            onClick={() => start(false)}
+          >
+            {preview?.duplicate ? 'Download anyway…' : 'Start Download'}
           </button>
           <button onClick={() => window.close()}>Cancel</button>
         </div>
@@ -793,6 +821,7 @@ function CompletedDownload({ item }: { item: DownloadItem }) {
   )
 }
 function MainApp() {
+  const [submitting, setSubmitting] = useState(false)
   const importDrag = useDialogDrag()
   const exportDrag = useDialogDrag()
   const [items, setItems] = useState<DownloadItem[]>([]),
@@ -837,6 +866,8 @@ function MainApp() {
     return () => window.removeEventListener('focus', refreshSettings)
   }, [])
   useEffect(() => {
+    setInspecting(false)
+    setPreview(undefined)
     if (!dialog || !url.trim()) {
       setPreview(undefined)
       return
@@ -900,11 +931,14 @@ function MainApp() {
   const toolbarQueueId = category.startsWith('queue:') ? category.slice(6) : mainQueue?.id
   const toolbarQueue = queues.find((queue) => queue.id === toolbarQueueId)
   async function add(queued = false) {
+    if (!preview || submitting) return
+    setSubmitting(true)
+    setError('')
     try {
-      if (!preview) return
       const item = queued
         ? await window.downloads.enqueue(url.trim(), selectedQueue, fileSegments, preview.savePath)
         : await window.downloads.add(url.trim(), false, undefined, fileSegments, preview.savePath)
+      if (!item) return
       setSelectedIds(new Set([item.id]))
       if (!queued) await window.downloads.showProgress(item.id)
       setUrl('')
@@ -912,17 +946,23 @@ function MainApp() {
       setDialog(false)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Unable to add download')
+    } finally {
+      setSubmitting(false)
     }
   }
   async function browseSavePath() {
     if (!preview) return
-    const path = await window.downloads.chooseSavePath(preview.savePath)
-    if (path)
-      setPreview({
-        ...preview,
-        savePath: path,
-        fileName: path.split(/[\\/]/).pop() || preview.fileName,
-      })
+    try {
+      const path = await window.downloads.chooseSavePath(preview.savePath)
+      if (path)
+        setPreview({
+          ...preview,
+          savePath: path,
+          fileName: path.split(/[\\/]/).pop() || preview.fileName,
+        })
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Unable to choose a destination')
+    }
   }
   const openQueueManager = () => window.downloads.showUtilityWindow('scheduler', [], selectedQueue)
   async function importList() {
@@ -1244,6 +1284,7 @@ function MainApp() {
               {error && <p className="dialog-error">{error}</p>}
               {preview && (
                 <>
+                  <DuplicateNotice preview={preview} />
                   <div className="file-overview">
                     <FileIcon name={preview.fileName} />
                     <div>
@@ -1272,7 +1313,13 @@ function MainApp() {
                       Save As{' '}
                       <input
                         value={preview.savePath}
-                        onChange={(e) => setPreview({ ...preview, savePath: e.target.value })}
+                        onChange={(e) =>
+                          setPreview({
+                            ...preview,
+                            savePath: e.target.value,
+                            fileName: e.target.value.split(/[\\/]/).pop() || '',
+                          })
+                        }
                       />
                       <button onClick={browseSavePath}>…</button>
                     </label>
@@ -1310,11 +1357,15 @@ function MainApp() {
               )}
             </div>
             <div className="dialog-actions">
-              <button disabled={!preview || !selectedQueue} onClick={() => add(true)}>
+              <button disabled={submitting || !preview || !selectedQueue} onClick={() => add(true)}>
                 Download Later
               </button>
-              <button className="primary" disabled={!preview} onClick={() => add(false)}>
-                Start Download
+              <button
+                className="primary"
+                disabled={submitting || !preview}
+                onClick={() => add(false)}
+              >
+                {preview?.duplicate ? 'Download anyway…' : 'Start Download'}
               </button>
               <button onClick={() => setDialog(false)}>Cancel</button>
             </div>

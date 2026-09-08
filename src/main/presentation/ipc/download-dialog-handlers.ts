@@ -1,3 +1,4 @@
+import { downloadDestination } from '../../infrastructure/download-destination'
 import { SocialDownloadHistory } from '../../infrastructure/social-download-history'
 import {
   app,
@@ -182,12 +183,40 @@ export function registerDownloadDialogHandlers(
   ipcMain.handle(IPC.setQueueCompletion, (_e, id, options) =>
     service.setQueueCompletion(id, options),
   )
-  ipcMain.handle(IPC.inspect, (_e, url: string) => inspect(url))
+  ipcMain.handle(IPC.inspect, async (_e, url: string) => {
+    const existing = service.findDuplicate(url)
+    // A known URL can be recognized even when the server is offline or the link has expired.
+    const preview: DownloadPreview = existing
+      ? {
+          fileName: existing.fileName,
+          size: existing.totalBytes,
+          mimeType: 'application/octet-stream',
+          category: category(existing.fileName, ''),
+          savePath: existing.savePath || join(app.getPath('downloads'), existing.fileName),
+        }
+      : await inspect(url)
+    const conflict = service.checkDuplicate(url, preview.savePath)
+    return {
+      ...preview,
+      fileName: basename(conflict.nextPath),
+      savePath: conflict.nextPath,
+      duplicate: conflict.conflict
+        ? {
+            id: conflict.existing?.id,
+            status: conflict.existing?.status,
+            fileName: conflict.existing?.fileName || preview.fileName,
+          }
+        : undefined,
+    }
+  })
   ipcMain.handle(IPC.chooseSavePath, async (_e, path: string) => {
     const result = await dialog.showSaveDialog({
       title: 'Save download as',
       buttonLabel: 'Save',
-      defaultPath: path,
+      defaultPath: downloadDestination(
+        path,
+        service.list().map((item) => item.savePath),
+      ),
     })
     return result.canceled ? undefined : result.filePath
   })
@@ -680,16 +709,6 @@ export function registerDownloadDialogHandlers(
         event.sender.removeListener('destroyed', markInterrupted)
       }
     },
-  )
-  ipcMain.removeHandler(IPC.startNow)
-  ipcMain.handle(IPC.startNow, (_e, url: string, segments?: number, path?: string) =>
-    service.add(url, segments, path),
-  )
-  ipcMain.removeHandler(IPC.enqueue)
-  ipcMain.handle(
-    IPC.enqueue,
-    (_e, url: string, queueId?: string, segments?: number, path?: string) =>
-      service.enqueue(url, queueId, segments, path),
   )
 }
 export function progressWindow(id: string) {

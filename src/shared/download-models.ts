@@ -32,6 +32,7 @@ export interface DownloadQueue {
   completion?: CompletionOptions
 }
 export interface DownloadPreview {
+  duplicate?: { id?: string; status?: DownloadStatus; fileName: string }
   fileName: string
   size: number
   mimeType: string

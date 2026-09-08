@@ -2,16 +2,23 @@ import { app, BrowserWindow, clipboard, dialog, ipcMain, shell } from 'electron'
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 import { basename } from 'node:path'
 import { IPC } from '../../../shared/download'
+import { createDownloadSubmit } from './download-submit'
 import type { DownloadService } from '../../application/download-service'
-export function registerDownloadHandlers(service: DownloadService) {
+export function registerDownloadHandlers(
+  service: DownloadService,
+  showProgress: (id: string) => void,
+) {
+  const submit = createDownloadSubmit(service, showProgress)
   ipcMain.handle(IPC.list, () => service.list())
-  ipcMain.handle(IPC.add, (_e, url: string, queueId?: string, segments?: number) =>
-    service.enqueue(url, queueId, segments),
+  for (const channel of [IPC.add, IPC.enqueue])
+    ipcMain.handle(
+      channel,
+      (event, url: string, queueId?: string, segments?: number, path?: string) =>
+        submit(event, url, segments, path, true, queueId),
+    )
+  ipcMain.handle(IPC.startNow, (event, url: string, segments?: number, path?: string) =>
+    submit(event, url, segments, path),
   )
-  ipcMain.handle(IPC.enqueue, (_e, url: string, queueId?: string, segments?: number) =>
-    service.enqueue(url, queueId, segments),
-  )
-  ipcMain.handle(IPC.startNow, (_e, url: string, segments?: number) => service.add(url, segments))
   ipcMain.handle(IPC.importList, async (_e, queueId: string) => {
     const picked = await dialog.showOpenDialog({
       title: 'Import download list',
@@ -34,8 +41,9 @@ export function registerDownloadHandlers(service: DownloadService) {
       const value = raw.trim()
       if (!value || value.startsWith('#')) continue
       try {
-        service.enqueue(value, queueId)
-        imported++
+        const item = await submit(_e, value, undefined, undefined, true, queueId, true)
+        if (item) imported++
+        else skipped++
       } catch {
         skipped++
       }

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { basename } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
 import type { CompletionOptions, DownloadItem, DownloadQueue } from '../../shared/download'
 import type { DownloadRepository } from '../domain/download-repository'
 import type { ElectronDownloadEngine } from '../infrastructure/electron-download-engine'
@@ -10,8 +10,10 @@ export class DownloadService {
     private repo: DownloadRepository,
     private engine: ElectronDownloadEngine,
     private notify: () => void,
+    private destination: (path: string, reserved: string[]) => string,
+    private downloadsDirectory: string,
   ) {
-    if (!repo.allQueues().length)
+    if (!repo.getQueue('main'))
       repo.saveQueue({
         id: 'main',
         name: 'Main download queue',
@@ -20,8 +22,18 @@ export class DownloadService {
       })
   }
   list = () => this.repo.all()
+  findDuplicate = (value: string) => {
+    const normalize = (input: string) => {
+      const url = new URL(input)
+      url.hash = ''
+      return url.href
+    }
+    const url = normalize(value)
+    return this.repo.all().find((item) => normalize(item.url) === url)
+  }
   get = (id: string) => this.repo.get(id)
-  listQueues = () => this.repo.allQueues()
+  listQueues = () =>
+    this.repo.allQueues().sort((a, b) => Number(b.id === 'main') - Number(a.id === 'main'))
   getSegmentCount = () => this.repo.getSegmentCount()
   setSegmentCount = (value: number) =>
     this.repo.setSegmentCount(Number.isInteger(value) && value >= 1 && value <= 8 ? value : 4)
@@ -54,7 +66,7 @@ export class DownloadService {
   }
   enqueue = (urlValue: string, queueId = 'main', segmentCount?: number, savePath?: string) => {
     const item = this.create(urlValue, segmentCount, savePath)
-    const queue = this.repo.getQueue(queueId) ?? this.repo.allQueues()[0]
+    const queue = this.repo.getQueue(queueId) ?? this.repo.getQueue('main')!
     item.queueId = queue?.id
     this.repo.save(item)
     this.notify()
@@ -63,7 +75,7 @@ export class DownloadService {
   pause = (id: string) => this.engine.pause(id)
   resume = (id: string) => {
     const item = this.repo.get(id)
-    if (!item) return
+    if (!item || item.status === 'completed') return
     if (this.engine.isActive(id)) this.engine.resume(id)
     else this.engine.start(item.id, item.url, item.fileName)
   }
@@ -164,13 +176,33 @@ export class DownloadService {
     for (const item of next) this.engine.start(item.id, item.url, item.fileName)
     if (!next.length && active === 0) this.runningQueues.delete(id)
   }
-  private create(urlValue: string, segmentCount?: number, savePath = ''): DownloadItem {
+  checkDuplicate(urlValue: string, savePath = '') {
     const url = new URL(urlValue)
     if (!['http:', 'https:'].includes(url.protocol))
       throw new Error('Only HTTP and HTTPS URLs are supported.')
     const fileName = savePath
       ? basename(savePath)
-      : decodeURIComponent(basename(url.pathname)) || `download-${Date.now()}`
+      : (decodeURIComponent(basename(url.pathname)) || 'download').replace(/[\\/:*?"<>|]/g, '_')
+    const requestedPath = savePath || join(this.downloadsDirectory, fileName)
+    const records = this.repo.all()
+    const reserved = records.flatMap((item) => [
+      item.savePath || join(this.downloadsDirectory, item.fileName),
+      join(dirname(requestedPath), item.fileName),
+    ])
+    const nextPath = this.destination(requestedPath, reserved)
+    const existing =
+      this.findDuplicate(urlValue) ?? records.find((item) => item.fileName === fileName)
+    return {
+      existing,
+      requestedPath: resolve(requestedPath),
+      nextPath,
+      conflict: Boolean(existing) || nextPath !== resolve(requestedPath),
+    }
+  }
+  private create(urlValue: string, segmentCount?: number, savePath = ''): DownloadItem {
+    const url = new URL(urlValue)
+    savePath = this.checkDuplicate(urlValue, savePath).nextPath
+    const fileName = basename(savePath)
     const chosen =
       Number.isInteger(segmentCount) && segmentCount! >= 1 && segmentCount! <= 8
         ? segmentCount!

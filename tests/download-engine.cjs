@@ -24,10 +24,19 @@ vm.runInNewContext(source, {
         app: { getPath: () => os.tmpdir() },
         net: { request: ({ url, method }) => http.request(url, { method }) },
       }
+    if (name === './download-destination')
+      return require('./load-typescript.cjs')('src/main/infrastructure/download-destination.ts')
     return require(name)
   },
 })
-for (const mode of ['ranges', 'tiny', 'ignored', 'parallel-ignored', 'probe-error']) {
+for (const mode of [
+  'ranges',
+  'tiny',
+  'ignored',
+  'parallel-ignored',
+  'probe-error',
+  'existing-file',
+]) {
   test(mode, { timeout: 5000 }, async () => {
     const body = Buffer.from(
       Array.from({ length: mode === 'tiny' ? 10 : 10000 }, (_, i) => i % 251),
@@ -66,6 +75,8 @@ for (const mode of ['ranges', 'tiny', 'ignored', 'parallel-ignored', 'probe-erro
       savePath: path.join(dir, 'file'),
       segmentCount: mode === 'tiny' ? 8 : 4,
     }
+    const originalPath = item.savePath
+    if (mode === 'existing-file') fs.writeFileSync(originalPath, 'original contents')
     try {
       let finish
       const finished = new Promise((resolve) => {
@@ -73,12 +84,16 @@ for (const mode of ['ranges', 'tiny', 'ignored', 'parallel-ignored', 'probe-erro
       })
       const engine = new exportsObject.ElectronDownloadEngine(
         {},
-        { get: () => item, save: () => {} },
+        { get: () => item, all: () => [item], save: () => {} },
         () => {},
         finish,
       )
       await engine.start(item.id, item.url, item.fileName)
       await finished
+      if (mode === 'existing-file') {
+        assert.equal(fs.readFileSync(originalPath, 'utf8'), 'original contents')
+        assert.equal(item.fileName, 'file (1)')
+      }
       if (mode === 'probe-error') {
         assert.equal(item.status, 'failed')
         assert.equal(fs.existsSync(item.savePath), false)

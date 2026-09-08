@@ -20,6 +20,8 @@ Nexus is an Electron + React + TypeScript download manager. Use npm and the exis
 - Ask when missing information changes the intended behavior; continue independent work while waiting.
 - Keep renderer code behind `window.downloads`; do not introduce Node or Electron imports there.
 - Keep shared IPC payloads serializable and persisted data backward-compatible.
+- Always provide the default Main download queue (stable ID `main`), restoring it on startup if missing even when custom queues exist. Show it first and use it as the default/fallback queue. It must never be deletable; enforce this in the main service and disable its delete action in the renderer. Preserve existing Main queue settings.
+- Adding downloads, including list imports, must check duplicate URLs, list filenames, and destination files and offer explicit actions. New copies use available numeric suffixes before the extension; never overwrite or silently delete existing files or records when adding.
 - Never put credentials, browser cookies, or private download URLs into committed examples or task notes.
 - Record durable architecture decisions in architecture notes; put temporary progress in a task file.
 - Update documentation when the change makes an existing statement inaccurate.

@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { existsSync } from 'node:fs'
 import { spawn } from 'node:child_process'
 import { DownloadService } from './application/download-service'
+import { downloadDestination } from './infrastructure/download-destination'
 import { ElectronDownloadEngine } from './infrastructure/electron-download-engine'
 import { JsonDownloadRepository } from './infrastructure/json-download-repository'
 import { useSystemCertificateAuthorities } from './infrastructure/system-ca-verifier'
@@ -114,13 +115,19 @@ app.whenReady().then(() => {
     () => notify(),
     (id) => finished(id),
   )
-  service = new DownloadService(repository, engine, () => notify())
+  service = new DownloadService(
+    repository,
+    engine,
+    () => notify(),
+    downloadDestination,
+    app.getPath('downloads'),
+  )
   notify = () => broadcastDownloads(service)
   finished = (id) => {
     service.onDownloadFinished(id)
     runCompletion(id)
   }
-  registerDownloadHandlers(service)
+  registerDownloadHandlers(service, progressWindow)
   registerDownloadDialogHandlers(service, progressWindow)
   createWindow()
   const startupUrl = process.argv.find((value) => /^https?:\/\//i.test(value))

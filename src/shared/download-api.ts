@@ -87,8 +87,13 @@ export interface DownloadApi {
     queueId?: string,
     segments?: number,
     path?: string,
-  ): Promise<DownloadItem>
-  enqueue(url: string, queueId?: string, segments?: number, path?: string): Promise<DownloadItem>
+  ): Promise<DownloadItem | undefined>
+  enqueue(
+    url: string,
+    queueId?: string,
+    segments?: number,
+    path?: string,
+  ): Promise<DownloadItem | undefined>
   importList(queueId: string): Promise<ImportResult>
   exportList(ids: string[]): Promise<ExportResult>
   pause(id: string): Promise<void>

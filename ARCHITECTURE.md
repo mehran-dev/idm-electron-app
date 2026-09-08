@@ -37,3 +37,9 @@ This project uses a pragmatic clean architecture for Electron. Dependencies poin
 ## Window sizing
 
 Finite renderer dialogs measure intrinsic content through `useContentWindowSize` and request their height via the typed `fitWindow` IPC bridge. The main process validates the requested height and constrains bounds to the display work area. CSS must not force these forms to a fixed viewport height. Main-library and media-history windows retain bounded, scrollable list layouts. All newly loaded windows, including remote sign-in, are constrained to their display's work area. Content larger than the available screen may scroll rather than clipping controls.
+
+## Download destinations
+
+HTTP download creation reserves a destination against persisted records and existing files through an injected filesystem adapter. Copies use numeric suffixes before the extension. Single additions and list imports share a submission adapter that offers existing-download status (or reveal on disk), a new copy, or cancellation/skipping for matching URLs (fragments ignored), list filenames, or occupied destinations. Filename reservations include entries in other directories. Cancellation or showing an existing download returns no new item through the bridge.
+
+The engine checks destinations again after probing and creates files exclusively, so an intervening file cannot be truncated. Restarting an inactive transfer creates a new numbered file if its previous partial file remains; in-memory pause/resume continues using its open file. Completed records cannot be resumed into an overwrite.

@@ -1,6 +1,7 @@
 import { app, net, type ClientRequest, type Session } from 'electron'
 import { closeSync, ftruncateSync, openSync, writeSync } from 'node:fs'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
+import { downloadDestination } from './download-destination'
 import type { DownloadRepository } from '../domain/download-repository'
 interface Segment {
   start: number
@@ -38,11 +39,17 @@ export class ElectronDownloadEngine {
   async start(id: string, url: string, fileName: string) {
     if (this.active.has(id)) return
     const item = this.repo.get(id)
-    if (!item) return
+    if (!item || item.status === 'completed') return
     try {
       const probe = await this.probe(url)
-      const savePath = item.savePath || join(app.getPath('downloads'), fileName)
-      const file = openSync(savePath, 'w+')
+      const savePath = downloadDestination(
+        item.savePath || join(app.getPath('downloads'), fileName),
+        this.repo
+          .all()
+          .filter((other) => other.id !== id)
+          .map((other) => other.savePath),
+      )
+      const file = openSync(savePath, 'wx+')
       if (probe.total > 0) ftruncateSync(file, probe.total)
       const count =
         probe.ranges && probe.total > 0 ? Math.min(item.segmentCount ?? 1, probe.total) : 1
@@ -67,6 +74,7 @@ export class ElectronDownloadEngine {
       }
       this.active.set(id, state)
       item.savePath = savePath
+      item.fileName = basename(savePath)
       item.totalBytes = probe.total
       item.receivedBytes = 0
       item.segmentProgress = segments.map(() => 0)
