@@ -1,0 +1,16 @@
+# Optional project configuration example; this file is NOT loaded by Codex.
+# Review and copy to .codex/config.toml to activate in a trusted project.
+# Managed settings and session overrides can take precedence.
+# Reference: https://learn.chatgpt.com/docs/config-file/config-reference
+
+# Allow ordinary edits within the workspace.
+sandbox_mode = "workspace-write"
+
+# Request approval when an action needs escalation.
+approval_policy = "on-request"
+
+[sandbox_workspace_write]
+# Network access may require separate approval, for example for npm install.
+network_access = false
+
+# Keep the session's model defaults. No external tools or hooks are configured.

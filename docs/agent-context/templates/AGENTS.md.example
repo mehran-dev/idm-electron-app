@@ -1,0 +1,25 @@
+# Project instructions template
+
+Replace angle-bracket placeholders before using this file as AGENTS.md.
+
+## Project
+
+<One sentence describing the product and stack.>
+
+## Context map
+
+- Architecture: <path and when to read it>
+- Area-specific rules: <paths and scopes>
+- Verification: <path>
+
+## Working agreements
+
+- Read the relevant implementation before editing.
+- Preserve unrelated work and keep changes focused on the requested outcome.
+- <Concrete architectural invariant.>
+- <Concrete compatibility requirement.>
+- Update documentation when behavior changes.
+
+## Completion
+
+Run <actual relevant commands>. Report outcomes and any unverified behavior. Keep temporary task progress outside this file.

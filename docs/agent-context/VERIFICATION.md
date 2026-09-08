@@ -1,0 +1,46 @@
+# Verification guide
+
+Run commands from the repository root. Dependencies must already be installed. Check `package.json` when updating this guide; there is currently no `npm test` or `npm run lint` script.
+
+## Existing commands
+
+```bash
+npm run format:check
+npm run typecheck
+npm run check
+npm run build
+```
+
+`check` combines formatting and types. `build` also runs typechecking before bundling. For documentation-only edits, formatting and link/path checks are normally sufficient. Before committing application changes, follow the architecture document's check/build requirement.
+
+## Focused existing tests
+
+```bash
+node --test tests/youtube-session.test.cjs
+node --experimental-strip-types --test tests/social-download-environment.test.mjs
+node --test tests/download-engine.cjs
+```
+
+The environment test imports TypeScript directly and needs a Node runtime supporting `--experimental-strip-types` (the current development environment has Node 23.11.1). The CommonJS tests transpile their target TypeScript with the installed TypeScript package.
+
+- Session test: cookie export filtering and formatting; does not prove real Google login works.
+- Environment test: proxy/certificate environment handling; does not prove external connectivity.
+- Engine test: local HTTP server scenarios; requires permission to bind a local port and uses mocked Electron networking.
+
+Select tests for the affected behavior. When a real logic bug lacks coverage, add a regression test that reproduces the failure. Avoid tests that merely assert source text or mirror a cosmetic implementation.
+
+## Manual UI checks when relevant
+
+Launch with `npm run dev` in a desktop session.
+
+- Main window: resizing, readable sidebar, table scrolling, and no unwanted outer margin.
+- Columns: drag a header; check row alignment, sorting, resizing, and order after reopening.
+- Menus: toggle, choose an action, click outside, press Escape.
+- Dialogs: open affected standalone windows and check controls, clipping, focus, and close behavior.
+- Persisted state: use disposable test data for invalid or older settings, and confirm fallback behavior.
+
+Use a local fixture or a download you control for download checks. Do not use real credentials or destructive file operations as generic test data.
+
+## Result format
+
+Record the command, outcome, and relevant limitation. “Not run: no desktop session” is valid evidence reporting. A passing bundle does not establish interaction, native shadow rendering, or external provider authentication.

@@ -29,3 +29,7 @@ This project uses a pragmatic clean architecture for Electron. Dependencies poin
 ## Renderer direction
 
 `App.tsx` is now formatted and safe to edit, but it is still the largest migration target. New UI should be feature-oriented under `src/renderer/features/<feature>` with local components/hooks. Move existing dialogs incrementally, one tested feature at a time, instead of performing a risky all-at-once rewrite.
+
+## Agent context
+
+[AGENTS.md](AGENTS.md) routes agents to relevant project guidance. See the [verification guide](docs/agent-context/VERIFICATION.md) for available checks. Record substantial design decisions using the [decision template](docs/agent-context/templates/DECISION.md); keep task progress in a separate task document.
