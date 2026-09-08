@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Archive,
-  Search,
   Plus,
   ArrowDownToLine,
   CalendarClock,
@@ -762,7 +761,6 @@ function CompletedDownload({ item }: { item: DownloadItem }) {
   )
 }
 function MainApp() {
-  const [searchQuery, setSearchQuery] = useState('')
   const importDrag = useDialogDrag()
   const exportDrag = useDialogDrag()
   const [items, setItems] = useState<DownloadItem[]>([]),
@@ -842,14 +840,28 @@ function MainApp() {
     }
   }, [dialog, url])
   const visible = useMemo(
-    () =>
-      items.filter(
-        (item) =>
-          matchesCategory(item, category) &&
-          item.fileName.toLowerCase().includes(searchQuery.trim().toLowerCase()),
-      ),
-    [items, category, searchQuery],
+    () => items.filter((item) => matchesCategory(item, category)),
+    [items, category],
   )
+  useEffect(() => {
+    const dismiss = (event: PointerEvent) => {
+      const target = event.target as Element
+      if (!target.closest('.menu-root')) setTasksMenu(false)
+      if (!target.closest('.row-context')) setContext(undefined)
+    }
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setTasksMenu(false)
+        setContext(undefined)
+      }
+    }
+    document.addEventListener('pointerdown', dismiss)
+    document.addEventListener('keydown', escape)
+    return () => {
+      document.removeEventListener('pointerdown', dismiss)
+      document.removeEventListener('keydown', escape)
+    }
+  }, [])
   const selectedItems = items.filter((item) => selectedIds.has(item.id)),
     current = selectedItems[0]
   const mainQueue = queues.find((queue) => queue.id === 'main') ?? queues[0]
@@ -1151,38 +1163,6 @@ function MainApp() {
           onDelete={openQueueManager}
         />
         <div className="library-panel">
-          <div className="library-heading">
-            <div>
-              <h2>
-                {category.startsWith('queue:')
-                  ? (queues.find((q) => q.id === category.slice(6))?.name ?? 'Queue')
-                  : ({
-                      all: 'All downloads',
-                      unfinished: 'In progress',
-                      finished: 'Completed',
-                      video: 'Videos',
-                      music: 'Music',
-                      programs: 'Applications',
-                      documents: 'Documents',
-                      compressed: 'Archives',
-                      queues: 'Download queues',
-                    }[category as string] ?? 'Downloads')}
-              </h2>
-              <span>
-                {visible.length} files{selectedIds.size ? ` · ${selectedIds.size} selected` : ''}
-              </span>
-            </div>
-            <label className="download-search">
-              <Search size={17} />
-              <input
-                type="search"
-                aria-label="Search downloads"
-                placeholder="Search files…"
-                value={searchQuery}
-                onChange={(event) => setSearchQuery(event.target.value)}
-              />
-            </label>
-          </div>
           <DownloadTable
             items={visible}
             selected={selectedIds}
@@ -2061,13 +2041,13 @@ function CategoryTree({
         Library
         <div>
           <button title="Add queue" onClick={onAdd}>
-            ＋
+            <Plus size={20} />
           </button>
           <button title="Queue options" onClick={onEdit}>
-            ⚙
+            <Settings size={20} />
           </button>
           <button title="Delete queue" onClick={onDelete}>
-            ×
+            <X size={20} />
           </button>
         </div>
       </div>
@@ -2176,7 +2156,31 @@ function DownloadTable({
     direction: 'desc',
   })
   const [columnWidths, setColumnWidths] = useState([300, 90, 95, 80, 110, 155, 180])
-  const gridColumns = columnWidths.map((width) => `${width}px`).join(' ')
+  const [columnOrder, setColumnOrder] = useState<number[]>(() => {
+    try {
+      const saved: unknown = JSON.parse(localStorage.getItem('download-column-order') ?? 'null')
+      if (
+        Array.isArray(saved) &&
+        saved.length === 7 &&
+        new Set(saved).size === 7 &&
+        saved.every((value) => Number.isInteger(value) && value >= 0 && value < 7)
+      )
+        return saved
+    } catch {
+      /* Use the default layout if storage is unavailable. */
+    }
+    return [0, 1, 2, 3, 4, 5, 6]
+  })
+  const draggedColumn = useRef<number | null>(null)
+  const [dropTarget, setDropTarget] = useState<number | null>(null)
+  useEffect(() => {
+    try {
+      localStorage.setItem('download-column-order', JSON.stringify(columnOrder))
+    } catch {
+      /* Reordering remains available when storage is unavailable. */
+    }
+  }, [columnOrder])
+  const gridColumns = columnOrder.map((index) => `${columnWidths[index]}px`).join(' ')
   const resizeColumn = (event: React.PointerEvent, index: number) => {
     event.preventDefault()
     event.stopPropagation()
@@ -2228,11 +2232,46 @@ function DownloadTable({
     }))
   const header = (key: SortKey, label: string, index: number) => (
     <span
+      key={key}
+      style={{ order: columnOrder.indexOf(index) }}
+      className={dropTarget === index ? 'column-drop-target' : undefined}
+      onDragOver={(event) => {
+        if (draggedColumn.current === null) return
+        event.preventDefault()
+        event.dataTransfer.dropEffect = 'move'
+        setDropTarget(index)
+      }}
+      onDrop={(event) => {
+        event.preventDefault()
+        const source = draggedColumn.current
+        if (source !== null && source !== index) {
+          setColumnOrder((current) => {
+            const next = current.filter((value) => value !== source)
+            next.splice(current.indexOf(index), 0, source)
+            return next
+          })
+        }
+        draggedColumn.current = null
+        setDropTarget(null)
+      }}
       aria-sort={
         sort.key === key ? (sort.direction === 'asc' ? 'ascending' : 'descending') : 'none'
       }
     >
-      <button onClick={() => changeSort(key)}>
+      <button
+        draggable
+        title="Drag to reorder columns; click to sort"
+        onDragStart={(event) => {
+          draggedColumn.current = index
+          event.dataTransfer.effectAllowed = 'move'
+          event.dataTransfer.setData('text/plain', key)
+        }}
+        onDragEnd={() => {
+          draggedColumn.current = null
+          setDropTarget(null)
+        }}
+        onClick={() => changeSort(key)}
+      >
         {label}
         <i>{sort.key === key ? (sort.direction === 'asc' ? '▲' : '▼') : ''}</i>
       </button>
@@ -2264,7 +2303,7 @@ function DownloadTable({
                 <ArrowDownToLine size={32} />
               </span>
               <h3>A little space for your next download</h3>
-              <p>No files match this view. Add a download or try another search.</p>
+              <p>No files match this view. Add a download or select another category.</p>
               <button
                 className="new-download"
                 onClick={() => window.downloads.showUtilityWindow('add')}
@@ -2287,18 +2326,24 @@ function DownloadTable({
                 key={item.id}
                 style={{ gridTemplateColumns: gridColumns }}
               >
-                <span className="name">
+                <span style={{ order: columnOrder.indexOf(0) }} className="name">
                   <FileIcon name={item.fileName} />
                   <b>{item.fileName}</b>
                 </span>
-                <span>{formatBytes(item.totalBytes)}</span>
-                <span>
+                <span style={{ order: columnOrder.indexOf(1) }}>
+                  {formatBytes(item.totalBytes)}
+                </span>
+                <span style={{ order: columnOrder.indexOf(2) }}>
                   <em className={`download-status status-${item.status}`}>{status(item)}</em>
                 </span>
-                <span>{timeLeft(item)}</span>
-                <span>{item.speed ? `${formatBytes(item.speed)}/sec` : ''}</span>
-                <span>{new Date(item.createdAt).toLocaleString()}</span>
-                <span title={item.error}>
+                <span style={{ order: columnOrder.indexOf(3) }}>{timeLeft(item)}</span>
+                <span style={{ order: columnOrder.indexOf(4) }}>
+                  {item.speed ? `${formatBytes(item.speed)}/sec` : ''}
+                </span>
+                <span style={{ order: columnOrder.indexOf(5) }}>
+                  {new Date(item.createdAt).toLocaleString()}
+                </span>
+                <span style={{ order: columnOrder.indexOf(6) }} title={item.error}>
                   {item.error ?? `${item.segmentCount ?? 1} connection(s)`}
                 </span>
               </div>

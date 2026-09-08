@@ -65,6 +65,7 @@ function runCompletion(id: string) {
 
 function createWindow() {
   const window = new BrowserWindow({
+    hasShadow: true,
     width: 1240,
     height: 780,
     minWidth: 940,

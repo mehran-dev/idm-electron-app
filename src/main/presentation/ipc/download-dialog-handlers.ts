@@ -153,6 +153,7 @@ export function registerDownloadDialogHandlers(
         queueId: queueId ?? '',
       }
       const child = new BrowserWindow({
+        hasShadow: true,
         width: 570,
         height: mode === 'import' ? 455 : 390,
         minWidth: 520,
@@ -199,6 +200,7 @@ export function registerDownloadDialogHandlers(
       }
       const [width, height] = sizes[mode]
       const child = new BrowserWindow({
+        hasShadow: true,
         width,
         height,
         minWidth: Math.min(width, 500),
@@ -590,6 +592,7 @@ export function progressWindow(id: string) {
     return
   }
   const window = new BrowserWindow({
+    hasShadow: true,
     width: 650,
     height: 570,
     minWidth: 560,

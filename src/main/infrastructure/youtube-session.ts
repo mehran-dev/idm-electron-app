@@ -54,6 +54,7 @@ export async function signInToYouTube(owner: WebContents, proxy?: string): Promi
     await new Promise<void>((resolve, reject) => {
       let signedIn = false
       const window = new BrowserWindow({
+        hasShadow: true,
         width: 960,
         height: 760,
         title: 'Sign in to YouTube to continue downloading',
