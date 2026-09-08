@@ -1,4 +1,5 @@
 import type {
+  SocialDownloadRecord,
   CompletionOptions,
   DownloadItem,
   DownloadPreview,
@@ -8,12 +9,15 @@ import type {
 } from './download-models'
 export const IPC = {
   windowAction: 'window:action',
+  fitWindow: 'window:fit-content',
   list: 'downloads:list',
   inspect: 'downloads:inspect',
   chooseSavePath: 'downloads:choose-save-path',
   showProgress: 'downloads:show-progress',
   showListWindow: 'downloads:show-list-window',
   showUtilityWindow: 'downloads:show-utility-window',
+  listSocialHistory: 'social-history:list',
+  socialHistoryAction: 'social-history:action',
   downloadSocial: 'downloads:download-social',
   forgetYouTubeSession: 'downloads:forget-youtube-session',
   openSocialFile: 'downloads:open-social-file',
@@ -52,6 +56,7 @@ export const IPC = {
 } as const
 export interface DownloadApi {
   windowAction(action: 'minimize' | 'maximize' | 'close'): Promise<void>
+  fitWindow(height: number): Promise<void>
   version: number
   list(): Promise<DownloadItem[]>
   inspect(url: string): Promise<DownloadPreview>
@@ -59,10 +64,12 @@ export interface DownloadApi {
   showProgress(id: string): Promise<void>
   showListWindow(mode: 'import' | 'export', ids: string[], queueId?: string): Promise<void>
   showUtilityWindow(
-    mode: 'add' | 'scheduler' | 'options' | 'delete' | 'youtube' | 'instagram',
+    mode: 'add' | 'scheduler' | 'options' | 'delete' | 'youtube' | 'instagram' | 'social-history',
     ids?: string[],
     queueId?: string,
   ): Promise<void>
+  listSocialHistory(): Promise<SocialDownloadRecord[]>
+  socialHistoryAction(id: string, action: 'open' | 'folder' | 'copy'): Promise<string>
   forgetYouTubeSession(): Promise<void>
   downloadSocial(
     platform: 'youtube' | 'instagram',

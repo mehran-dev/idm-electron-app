@@ -10,3 +10,5 @@ Read the root architecture document before changing process boundaries.
 - Preserve compatibility when reading old download records; specify defaults for new persisted fields.
 - For networking changes, consider redirects, missing length, ignored range requests, interruption, and cancellation as applicable.
 - Select focused tests from `docs/agent-context/VERIFICATION.md`; actual provider login requires separate manual verification.
+
+- Fit native dialog sizes through the typed `fitWindow` bridge, validate measurements, and clamp bounds to the current display work area (including its origin). Keep minimum sizes within that area and respect maximized/fullscreen windows. Remote sign-in and list windows remain user-resizable viewports.

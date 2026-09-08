@@ -10,3 +10,7 @@
 - Check both the main window and affected standalone dialogs; they share styles but have different viewport constraints.
 - Introduce new feature components incrementally as described in `ARCHITECTURE.md`.
 - For visual changes, report whether you actually inspected the running app.
+
+- Finite standalone dialogs use `useContentWindowSize` and the `content-sized-window` styles. Preserve intrinsic content height; do not add competing `window.resizeTo` calls or fixed viewport heights to forms. Recheck idle, loading, error, completion, and expanded states. Allow scrolling when content cannot fit the screen; do not hide or clip controls to remove a scrollbar. Main download/history lists keep bounded scrollable viewports.
+
+- Social downloaders have distinct setup, downloading, and completed views. Hide editable inputs and setup-only options during transfer; show the source and relevant progress instead. Resize to each state's actual content, including shrinking after setup. On failure restore the form with entered values; completion offers file actions and New download. Do not fix overflow by blindly increasing initial window height.

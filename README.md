@@ -53,3 +53,9 @@ If Google refuses embedded sign-in, close the sign-in window and choose Firefox 
 ## Working with coding agents
 
 Start with [AGENTS.md](AGENTS.md) for project instructions and the [context engineering guide](docs/agent-context/README.md) for an explanation of the harness, reusable task templates, and optional Codex configuration.
+
+## YouTube and Instagram history
+
+Each media downloader has a **History** button that opens a separate window for both providers. New attempts are saved in `social-download-history.json` in the application's user-data directory, independently of the main download list. History offers provider filters, Open, Open folder, and Copy link. If a file was moved or deleted, the action reports that instead of silently failing.
+
+Closing a downloader still stops its current attempt; the history records it as interrupted. Attempts left active when the app exits are marked interrupted on the next launch. Copy a media link into the existing downloader to try again; there is no automatic resume or queue. Earlier downloads made before this feature are not imported. Proxy credentials, cookies, and raw downloader output are not stored in history.

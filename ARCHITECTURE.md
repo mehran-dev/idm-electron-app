@@ -33,3 +33,7 @@ This project uses a pragmatic clean architecture for Electron. Dependencies poin
 ## Agent context
 
 [AGENTS.md](AGENTS.md) routes agents to relevant project guidance. See the [verification guide](docs/agent-context/VERIFICATION.md) for available checks. Record substantial design decisions using the [decision template](docs/agent-context/templates/DECISION.md); keep task progress in a separate task document.
+
+## Window sizing
+
+Finite renderer dialogs measure intrinsic content through `useContentWindowSize` and request their height via the typed `fitWindow` IPC bridge. The main process validates the requested height and constrains bounds to the display work area. CSS must not force these forms to a fixed viewport height. Main-library and media-history windows retain bounded, scrollable list layouts. All newly loaded windows, including remote sign-in, are constrained to their display's work area. Content larger than the available screen may scroll rather than clipping controls.

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Notification, session, shell } from 'electron'
+import { app, BrowserWindow, Notification, session, shell, screen } from 'electron'
 import { join } from 'node:path'
 import { existsSync } from 'node:fs'
 import { spawn } from 'node:child_process'
@@ -83,6 +83,24 @@ function createWindow() {
   else window.loadFile(join(__dirname, '../renderer/index.html'))
 }
 app.whenReady().then(() => {
+  app.on('browser-window-created', (_event, window) => {
+    const constrain = () => {
+      if (window.isDestroyed() || window.isMaximized() || window.isFullScreen()) return
+      const bounds = window.getBounds()
+      const area = screen.getDisplayMatching(bounds).workArea
+      const [minWidth = 0, minHeight = 0] = window.getMinimumSize()
+      window.setMinimumSize(Math.min(minWidth, area.width), Math.min(minHeight, area.height))
+      const width = Math.min(bounds.width, area.width)
+      const height = Math.min(bounds.height, area.height)
+      window.setBounds({
+        width,
+        height,
+        x: Math.max(area.x, Math.min(bounds.x, area.x + area.width - width)),
+        y: Math.max(area.y, Math.min(bounds.y, area.y + area.height - height)),
+      })
+    }
+    window.webContents.once('did-finish-load', constrain)
+  })
   useSystemCertificateAuthorities(session.defaultSession)
   session.defaultSession.webRequest.onErrorOccurred((details) =>
     console.error('[Request failed]', { url: details.url, error: details.error }),

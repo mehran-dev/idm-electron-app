@@ -2,7 +2,10 @@ import { contextBridge, ipcRenderer } from 'electron'
 import { IPC, type DownloadApi, type DownloadItem } from '../shared/download'
 const api: DownloadApi = {
   windowAction: (action) => ipcRenderer.invoke(IPC.windowAction, action),
-  version: 9,
+  version: 11,
+  fitWindow: (height) => ipcRenderer.invoke(IPC.fitWindow, height),
+  listSocialHistory: () => ipcRenderer.invoke(IPC.listSocialHistory),
+  socialHistoryAction: (id, action) => ipcRenderer.invoke(IPC.socialHistoryAction, id, action),
   list: () => ipcRenderer.invoke(IPC.list),
   inspect: (url) => ipcRenderer.invoke(IPC.inspect, url),
   chooseSavePath: (path) => ipcRenderer.invoke(IPC.chooseSavePath, path),

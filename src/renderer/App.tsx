@@ -1,3 +1,5 @@
+import { useContentWindowSize } from './hooks/useContentWindowSize'
+import { SocialHistoryWindow } from './features/social-history/SocialHistoryWindow'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Archive,
@@ -57,10 +59,12 @@ const archives = ['zip', 'rar', '7z', 'tar', 'gz']
 const programs = ['exe', 'msi', 'dmg', 'deb', 'rpm', 'appimage']
 
 export function App() {
+  useContentWindowSize()
   const params = new URLSearchParams(location.search)
   const id = params.get('progress')
   const listDialog = params.get('listDialog')
   const utilityDialog = params.get('utilityDialog')
+  if (utilityDialog === 'social-history') return <SocialHistoryWindow />
   if (id) return <ProgressWindow id={id} />
   if (listDialog === 'import' || listDialog === 'export')
     return <ListDialogWindow mode={listDialog} params={params} />
@@ -194,87 +198,117 @@ function SocialDownloadWindow({ platform }: { platform: 'youtube' | 'instagram' 
         <div className="social-body">
           <Icon />
           <div>
-            <h2>{label} media downloader</h2>
+            <h2>
+              {downloading
+                ? `Downloading from ${label}`
+                : completed
+                  ? 'Download complete'
+                  : `${label} media downloader`}
+            </h2>
             <p>
-              {platform === 'instagram'
-                ? 'Open a video or reel on Instagram, then copy and paste its link.'
-                : 'Paste a video URL. If needed, sign in once in the window that opens; downloading resumes automatically.'}
+              {downloading
+                ? 'Your media is being prepared and saved.'
+                : completed
+                  ? 'Your file is ready to open.'
+                  : platform === 'instagram'
+                    ? 'Open a video or reel on Instagram, then copy and paste its link.'
+                    : 'Paste a video URL. If needed, sign in once in the window that opens; downloading resumes automatically.'}
             </p>
           </div>
-          {platform === 'youtube' && (
-            <small>
-              <button
+          {!downloading && !completed && (
+            <>
+              {platform === 'youtube' && (
+                <small>
+                  <button
+                    disabled={downloading}
+                    onClick={async () => {
+                      try {
+                        await window.downloads.forgetYouTubeSession()
+                        setStatusMessage('Saved YouTube sign-in removed.')
+                      } catch (error) {
+                        setStatusMessage(
+                          error instanceof Error ? error.message : 'Could not remove sign-in.',
+                        )
+                      }
+                    }}
+                  >
+                    Forget YouTube sign-in
+                  </button>
+                </small>
+              )}
+              <label htmlFor="social-url">Media address</label>
+              <input
+                id="social-url"
+                autoFocus
+                placeholder={`https://${platform === 'youtube' ? 'youtube.com/watch?v=…' : 'instagram.com/reel/…'}`}
+                value={url}
                 disabled={downloading}
-                onClick={async () => {
-                  try {
-                    await window.downloads.forgetYouTubeSession()
-                    setStatusMessage('Saved YouTube sign-in removed.')
-                  } catch (error) {
-                    setStatusMessage(
-                      error instanceof Error ? error.message : 'Could not remove sign-in.',
-                    )
-                  }
+                onChange={(event) => {
+                  setUrl(event.target.value)
+                  setCompleted(false)
+                  setStatusMessage('')
                 }}
-              >
-                Forget YouTube sign-in
-              </button>
-            </small>
+              />
+              <small>
+                Download only media you own or have permission to save. Private, paid, and
+                DRM-protected content is not bypassed.
+              </small>
+              <label htmlFor="social-proxy">Proxy (optional)</label>
+              <input
+                id="social-proxy"
+                value={proxyUrl}
+                disabled={downloading}
+                placeholder="http://127.0.0.1:PORT or socks5://127.0.0.1:PORT"
+                onChange={(event) => setProxyUrl(event.target.value)}
+                autoComplete="off"
+                spellCheck={false}
+              />
+              <small>
+                Use the address and port shown in your VPN app. Leave blank for automatic settings.
+              </small>
+              <label className="social-certificate-option">
+                <input
+                  type="checkbox"
+                  checked={allowInvalidCertificate}
+                  onChange={(event) => setAllowInvalidCertificate(event.target.checked)}
+                />
+                Allow untrusted certificates (less secure; use only if normal downloads report a
+                certificate error)
+              </label>
+            </>
           )}
-          <label htmlFor="social-url">Media address</label>
-          <input
-            id="social-url"
-            autoFocus
-            placeholder={`https://${platform === 'youtube' ? 'youtube.com/watch?v=…' : 'instagram.com/reel/…'}`}
-            value={url}
-            disabled={downloading}
-            onChange={(event) => {
-              setUrl(event.target.value)
-              setCompleted(false)
-              setStatusMessage('')
-            }}
-          />
-          <small>
-            Download only media you own or have permission to save. Private, paid, and DRM-protected
-            content is not bypassed.
-          </small>
-          <label htmlFor="social-proxy">Proxy (optional)</label>
-          <input
-            id="social-proxy"
-            value={proxyUrl}
-            disabled={downloading}
-            placeholder="http://127.0.0.1:PORT or socks5://127.0.0.1:PORT"
-            onChange={(event) => setProxyUrl(event.target.value)}
-            autoComplete="off"
-            spellCheck={false}
-          />
-          <small>
-            Use the address and port shown in your VPN app. Leave blank for automatic settings.
-          </small>
-          <label className="social-certificate-option">
-            <input
-              type="checkbox"
-              checked={allowInvalidCertificate}
-              onChange={(event) => setAllowInvalidCertificate(event.target.checked)}
-            />
-            Allow untrusted certificates (less secure; use only if normal downloads report a
-            certificate error)
-          </label>
+          {(downloading || completed) && (
+            <div className="social-source" title={url}>
+              {url}
+            </div>
+          )}
           {!downloading && statusMessage && <div className="social-status">{statusMessage}</div>}
           {downloading && (
             <div className="social-progress">
+              <small>Closing this window stops the download. The attempt stays in History.</small>
               <div>
                 <span>{progress.status}</span>
                 <b>{progress.percent > 0 ? `${progress.percent.toFixed(0)}%` : 'Please wait'}</b>
               </div>
               {progress.percent > 0 ? (
-                <progress max="100" value={progress.percent} />
+                <progress
+                  aria-label="Current media stream progress"
+                  max="100"
+                  value={progress.percent}
+                />
               ) : (
-                <progress />
+                <progress aria-label="Preparing media" />
               )}
             </div>
           )}
         </div>
         <div className="dialog-actions">
+          <button
+            className="social-history-link"
+            onClick={() => window.downloads.showUtilityWindow('social-history')}
+          >
+            History
+          </button>
           {completed ? (
             <>
               <button
@@ -294,12 +328,23 @@ function SocialDownloadWindow({ platform }: { platform: 'youtube' | 'instagram' 
               </button>
               <button onClick={() => window.downloads.showSocialFileInFolder()}>Open Folder</button>
             </>
-          ) : (
+          ) : !downloading ? (
             <button className="primary" disabled={!url.trim() || downloading} onClick={download}>
-              {downloading ? 'Downloading…' : 'Download'}
+              Download
+            </button>
+          ) : null}
+          {completed && (
+            <button
+              onClick={() => {
+                setCompleted(false)
+                setStatusMessage('')
+                setUrl('')
+              }}
+            >
+              New download
             </button>
           )}
-          <button onClick={() => window.close()}>Close</button>
+          <button onClick={() => window.close()}>{downloading ? 'Stop and close' : 'Close'}</button>
         </div>
       </div>
     </div>
@@ -362,19 +407,6 @@ function AddDownloadWindow({
   const [inspecting, setInspecting] = useState(false)
   const [segments, setSegments] = useState(segmentCount)
   const [queueId, setQueueId] = useState(initialQueue)
-  const dialogElement = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    const dialog = dialogElement.current
-    if (!dialog) return
-    const fitWindowToContent = () => {
-      const height = Math.max(180, Math.ceil(dialog.getBoundingClientRect().height) + 2)
-      if (Math.abs(window.innerHeight - height) > 1) window.resizeTo(620, height)
-    }
-    const observer = new ResizeObserver(fitWindowToContent)
-    observer.observe(dialog)
-    fitWindowToContent()
-    return () => observer.disconnect()
-  }, [])
   useEffect(() => {
     if (!queueId && queues[0]) setQueueId(queues[0].id)
   }, [queues, queueId])
@@ -429,7 +461,7 @@ function AddDownloadWindow({
   }
   return (
     <div className="native-dialog-host address-dialog-host">
-      <div ref={dialogElement} className="dialog file-info-dialog">
+      <div className="dialog file-info-dialog">
         <div className="dialog-title">
           New download<button onClick={() => window.close()}>×</button>
         </div>

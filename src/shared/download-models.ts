@@ -49,3 +49,13 @@ export interface ExportResult {
   exported: number
   cancelled: boolean
 }
+
+export interface SocialDownloadRecord {
+  id: string
+  platform: 'youtube' | 'instagram'
+  url: string
+  createdAt: string
+  updatedAt: string
+  status: 'downloading' | 'completed' | 'failed' | 'interrupted'
+  filePath?: string
+}

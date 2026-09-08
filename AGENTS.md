@@ -24,6 +24,8 @@ Nexus is an Electron + React + TypeScript download manager. Use npm and the exis
 - Record durable architecture decisions in architecture notes; put temporary progress in a task file.
 - Update documentation when the change makes an existing statement inaccurate.
 
+- Size finite dialog windows to their actual content and clamp them to the display work area. Avoid unnecessary scrollbars; keep growing lists in bounded scrollable viewports.
+
 ## Completion
 
 Run relevant checks from the verification guide. Report what changed, commands and outcomes, and any unverified behavior. Do not describe a build as proof of interactive UI behavior. Do not commit or publish unless requested.
