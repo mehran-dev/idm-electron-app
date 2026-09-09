@@ -73,11 +73,14 @@ export function registerDownloadHandlers(
   ipcMain.handle(IPC.deleteCompleted, () => service.deleteCompleted())
   ipcMain.handle(IPC.open, (_e, id: string) => {
     const item = service.get(id)
-    return item?.savePath ? shell.openPath(item.savePath) : undefined
+    return item?.status === 'completed' && item.savePath && existsSync(item.savePath)
+      ? shell.openPath(item.savePath)
+      : undefined
   })
   ipcMain.handle(IPC.showInFolder, (_e, id: string) => {
     const item = service.get(id)
-    if (item?.savePath) shell.showItemInFolder(item.savePath)
+    if (item?.status === 'completed' && item.savePath && existsSync(item.savePath))
+      shell.showItemInFolder(item.savePath)
   })
   ipcMain.handle(IPC.copyUrl, (_e, id: string) => {
     const item = service.get(id)

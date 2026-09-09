@@ -30,6 +30,7 @@ test('import prompts for filenames on disk and within the batch; skip and show p
     const choices = [0, 0, 2, 1]
     const prompts = []
     const shown = []
+    const opened = []
     const handlers = {}
     const electron = {
       BrowserWindow: { fromWebContents: () => undefined },
@@ -45,7 +46,10 @@ test('import prompts for filenames on disk and within the batch; skip and show p
           return { response: choices.shift() }
         },
       },
-      shell: { showItemInFolder: (file) => shown.push(file) },
+      shell: {
+        openPath: (file) => opened.push(file),
+        showItemInFolder: (file) => shown.push(file),
+      },
     }
     const submit = load('src/main/presentation/ipc/download-submit.ts', { electron })
     const { registerDownloadHandlers } = load('src/main/presentation/ipc/download-handlers.ts', {
@@ -71,6 +75,19 @@ test('import prompts for filenames on disk and within the batch; skip and show p
     assert.equal(fs.readFileSync(target, 'utf8'), 'keep this')
     assert.equal(shown[0], target)
     assert.equal(fs.readdirSync(dir).sort().join(','), 'file.zip,list.txt')
+
+    const queued = service.list()[0]
+    await handlers.open({}, queued.id)
+    await handlers.showInFolder({}, queued.id)
+    assert.deepEqual(opened, [])
+    assert.equal(shown.length, 1)
+
+    queued.status = 'completed'
+    fs.writeFileSync(queued.savePath, 'finished copy')
+    await handlers.open({}, queued.id)
+    await handlers.showInFolder({}, queued.id)
+    assert.deepEqual(opened, [queued.savePath])
+    assert.equal(shown.at(-1), queued.savePath)
   } finally {
     fs.rmSync(dir, { recursive: true, force: true })
   }

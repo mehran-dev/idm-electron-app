@@ -1024,6 +1024,10 @@ function MainApp() {
   }
   const stopAll = () =>
     items.filter((i) => i.status === 'downloading').forEach((i) => window.downloads.pause(i.id))
+  const openItem = (item: DownloadItem) =>
+    item.status === 'completed'
+      ? window.downloads.open(item.id)
+      : window.downloads.showProgress(item.id)
   return (
     <div className="idm-app">
       <div className="titlebar">
@@ -1239,11 +1243,15 @@ function MainApp() {
             items={visible}
             selected={selectedIds}
             onSelect={selectRow}
-            onOpen={(id) => window.downloads.showProgress(id)}
+            onOpen={openItem}
             onContext={(event, item) => {
               event.preventDefault()
               if (!selectedIds.has(item.id)) setSelectedIds(new Set([item.id]))
-              setContext({ x: event.clientX, y: event.clientY, item })
+              setContext({
+                x: Math.max(8, Math.min(event.clientX, window.innerWidth - 268)),
+                y: Math.max(8, Math.min(event.clientY, window.innerHeight - 274)),
+                item,
+              })
             }}
           />
         </div>
@@ -1415,22 +1423,22 @@ function MainApp() {
           onClick={(e) => e.stopPropagation()}
         >
           <button
-            disabled={context.item.status !== 'completed'}
             onClick={() => {
-              window.downloads.open(context.item.id)
+              openItem(context.item)
               setContext(undefined)
             }}
           >
-            Open
+            {context.item.status === 'completed' ? <Play size={16} /> : <CirclePlay size={16} />}
+            {context.item.status === 'completed' ? 'Open file' : 'Show download details'}
           </button>
           <button
-            disabled={!context.item.savePath}
+            disabled={context.item.status !== 'completed'}
             onClick={() => {
               window.downloads.showInFolder(context.item.id)
               setContext(undefined)
             }}
           >
-            Open folder
+            <FolderOpen size={16} /> Show in folder
           </button>
           <span />
           <button
@@ -1439,7 +1447,7 @@ function MainApp() {
               setContext(undefined)
             }}
           >
-            Copy download address
+            <FileText size={16} /> Copy download address
           </button>
           <span />
           <button
@@ -1449,7 +1457,7 @@ function MainApp() {
               setContext(undefined)
             }}
           >
-            Delete selected from list ({selectedItems.length})
+            <X size={16} /> Remove from list ({selectedItems.length})
           </button>
           <button
             className="danger"
@@ -1462,7 +1470,7 @@ function MainApp() {
               setContext(undefined)
             }}
           >
-            Delete selected file(s) from disk
+            <Trash2 size={16} /> Delete file{selectedItems.length === 1 ? '' : 's'} from disk
           </button>
         </div>
       )}
@@ -1951,7 +1959,6 @@ function DownloadProgress({ item, onClose }: { item: DownloadItem; onClose: () =
           </>
         )}
         <div className="progress-actions">
-          <button onClick={() => window.downloads.showInFolder(item.id)}>Open folder</button>
           {item.status === 'downloading' ? (
             <button className="primary" onClick={() => window.downloads.pause(item.id)}>
               Pause
@@ -2230,7 +2237,7 @@ function DownloadTable({
   items: DownloadItem[]
   selected: Set<string>
   onSelect: (event: React.MouseEvent, id: string) => void
-  onOpen: (id: string) => void
+  onOpen: (item: DownloadItem) => void
   onContext: (event: React.MouseEvent, item: DownloadItem) => void
 }) {
   type SortKey = 'fileName' | 'size' | 'status' | 'timeLeft' | 'speed' | 'date' | 'description'
@@ -2403,9 +2410,9 @@ function DownloadTable({
                 tabIndex={0}
                 aria-label={`${item.fileName}, ${status(item)}`}
                 onKeyDown={(event) => {
-                  if (event.key === 'Enter') onOpen(item.id)
+                  if (event.key === 'Enter') onOpen(item)
                 }}
-                onDoubleClick={() => onOpen(item.id)}
+                onDoubleClick={() => onOpen(item)}
                 key={item.id}
                 style={{ gridTemplateColumns: gridColumns }}
               >

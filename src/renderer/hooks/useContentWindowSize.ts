@@ -16,7 +16,9 @@ export function useContentWindowSize() {
     const measure = () => {
       cancelAnimationFrame(frame)
       frame = requestAnimationFrame(() => {
-        const height = Math.ceil(root.getBoundingClientRect().height)
+        // scrollHeight tracks the complete intrinsic form even after the native
+        // window has been clamped to a smaller display work area.
+        const height = Math.ceil(root.scrollHeight)
         if (height > 0 && height !== previousHeight) {
           previousHeight = height
           void window.downloads.fitWindow(height).catch(() => {

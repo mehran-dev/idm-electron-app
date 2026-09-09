@@ -134,6 +134,41 @@ button:not(.tool):not(.tree-toggle) {
 .app-menu {
   top: 28px;
 }
+.row-context {
+  width: 260px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: white;
+  box-shadow: 0 14px 42px #172b3530;
+}
+.row-context button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 36px;
+  height: auto;
+  padding: 7px 10px;
+  border-radius: 6px;
+  color: var(--ink);
+  font-size: 12px;
+}
+.row-context button:hover:not(:disabled) {
+  color: var(--accent);
+  background: var(--accent-soft);
+  outline: none;
+}
+.row-context button:disabled {
+  opacity: 0.45;
+  color: var(--muted);
+}
+.row-context span {
+  border-color: var(--line);
+  margin: 5px 4px;
+}
+.row-context button.danger {
+  color: #a13b3b;
+}
 .workspace-heading {
   display: flex;
   align-items: center;
