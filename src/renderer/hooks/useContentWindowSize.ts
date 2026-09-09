@@ -13,13 +13,15 @@ export function useContentWindowSize() {
     document.body.classList.add('content-sized-window', 'content-window-sizing')
     let frame = 0
     let previousHeight = 0
+    const contentHeight = () => Math.ceil(root.getBoundingClientRect().height)
     const measure = () => {
       cancelAnimationFrame(frame)
       frame = requestAnimationFrame(() => {
         if (root.querySelector('[data-content-ready="false"]')) return
-        // scrollHeight tracks the complete intrinsic form even after the native
-        // window has been clamped to a smaller display work area.
-        const height = Math.ceil(root.scrollHeight)
+        // Measure the laid-out content rather than scrollHeight. Scrollable
+        // overflow can include focus outlines, so losing window focus must not
+        // be mistaken for the dialog becoming shorter.
+        const height = contentHeight()
         if (height > 0 && height !== previousHeight) {
           previousHeight = height
           void window.downloads
@@ -37,10 +39,7 @@ export function useContentWindowSize() {
       })
     }
     const observer = new ResizeObserver(() => {
-      if (
-        !root.querySelector('[data-content-ready="false"]') &&
-        Math.ceil(root.scrollHeight) !== previousHeight
-      )
+      if (!root.querySelector('[data-content-ready="false"]') && contentHeight() !== previousHeight)
         document.body.classList.add('content-window-sizing')
       measure()
     })
