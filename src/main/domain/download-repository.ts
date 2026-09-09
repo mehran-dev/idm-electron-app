@@ -1,4 +1,4 @@
-import type { DownloadItem, DownloadQueue } from '../../shared/download'
+import type { CompletedDoubleClickAction, DownloadItem, DownloadQueue } from '../../shared/download'
 export interface DownloadRepository {
   all(): DownloadItem[]
   get(id: string): DownloadItem | undefined
@@ -10,5 +10,7 @@ export interface DownloadRepository {
   removeQueue(id: string): void
   getSegmentCount(): number
   setSegmentCount(value: number): void
+  getCompletedDoubleClickAction(): CompletedDoubleClickAction
+  setCompletedDoubleClickAction(value: CompletedDoubleClickAction): void
   flush(): void
 }

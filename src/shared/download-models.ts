@@ -1,5 +1,6 @@
 export type DownloadStatus =
   'queued' | 'downloading' | 'paused' | 'interrupted' | 'completed' | 'cancelled' | 'failed'
+export type CompletedDoubleClickAction = 'open-file' | 'show-dialog'
 export interface CompletionOptions {
   notification: boolean
   playSound: boolean

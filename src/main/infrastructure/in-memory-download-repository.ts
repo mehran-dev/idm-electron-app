@@ -1,9 +1,10 @@
-import type { DownloadItem, DownloadQueue } from '../../shared/download'
+import type { CompletedDoubleClickAction, DownloadItem, DownloadQueue } from '../../shared/download'
 import type { DownloadRepository } from '../domain/download-repository'
 export class InMemoryDownloadRepository implements DownloadRepository {
   private readonly items = new Map<string, DownloadItem>()
   private readonly queues = new Map<string, DownloadQueue>()
   private segmentCount = 4
+  private completedDoubleClickAction: CompletedDoubleClickAction = 'open-file'
   all = () => [...this.items.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt))
   get = (id: string) => this.items.get(id)
   save = (item: DownloadItem) => {
@@ -23,6 +24,10 @@ export class InMemoryDownloadRepository implements DownloadRepository {
   getSegmentCount = () => this.segmentCount
   setSegmentCount = (value: number) => {
     this.segmentCount = value
+  }
+  getCompletedDoubleClickAction = () => this.completedDoubleClickAction
+  setCompletedDoubleClickAction = (value: CompletedDoubleClickAction) => {
+    this.completedDoubleClickAction = value
   }
   flush = () => {}
 }

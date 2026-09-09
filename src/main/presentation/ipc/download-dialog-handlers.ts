@@ -25,6 +25,7 @@ import {
 } from '../../infrastructure/social-download-environment'
 import { IPC, type DownloadPreview } from '../../../shared/download'
 import type { DownloadService } from '../../application/download-service'
+import { centeredContentBounds } from '../window-fit'
 const socialProgressByWebContents = new Map<number, { percent: number; status: string }>()
 const socialFilesByWebContents = new Map<number, string>()
 const category = (name: string, mime: string) =>
@@ -120,23 +121,18 @@ export function registerDownloadDialogHandlers(
     return ''
   })
   ipcMain.handle(IPC.fitWindow, (event, requestedHeight: number) => {
-    if (!Number.isFinite(requestedHeight) || requestedHeight <= 0) return
+    if (!Number.isFinite(requestedHeight) || requestedHeight <= 0) return { clamped: false }
     const window = BrowserWindow.fromWebContents(event.sender)
-    if (!window || window.isMaximized() || window.isFullScreen()) return
+    if (!window || window.isMaximized() || window.isFullScreen()) return { clamped: false }
     const params = new URL(event.sender.getURL()).searchParams
-    if (!params.has('utilityDialog') && !params.has('listDialog') && !params.has('progress')) return
-    if (params.get('utilityDialog') === 'social-history') return
+    if (!params.has('utilityDialog') && !params.has('listDialog') && !params.has('progress'))
+      return { clamped: false }
+    if (params.get('utilityDialog') === 'social-history') return { clamped: false }
     const bounds = window.getBounds()
     const area = screen.getDisplayMatching(bounds).workArea
-    const height = Math.min(area.height, Math.max(120, Math.ceil(requestedHeight)))
-    const width = Math.min(bounds.width, area.width)
     window.setMinimumSize(Math.min(400, area.width), 120)
-    window.setBounds({
-      width,
-      height,
-      x: Math.max(area.x, Math.min(bounds.x, area.x + area.width - width)),
-      y: Math.max(area.y, Math.min(bounds.y, area.y + area.height - height)),
-    })
+    window.setBounds(centeredContentBounds(bounds, area, requestedHeight))
+    return { clamped: Math.ceil(requestedHeight) > area.height }
   })
   ipcMain.handle(IPC.windowAction, (event, action: string) => {
     const window = BrowserWindow.fromWebContents(event.sender)

@@ -1,4 +1,5 @@
 import { DuplicateNotice } from './features/add-download/DuplicateNotice'
+import { droppedDownloadUrl } from './features/add-download/dropped-url'
 import { useContentWindowSize } from './hooks/useContentWindowSize'
 import { SocialHistoryWindow } from './features/social-history/SocialHistoryWindow'
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -20,7 +21,9 @@ import {
   FolderOpen,
   Globe2,
   HardDriveDownload,
+  History,
   Instagram,
+  Link2,
   ListStart,
   Music2,
   Play,
@@ -32,6 +35,7 @@ import {
   X,
 } from 'lucide-react'
 import type {
+  CompletedDoubleClickAction,
   CompletionOptions,
   DownloadItem,
   DownloadPreview,
@@ -90,10 +94,13 @@ function UtilityDialogWindow({
 }) {
   const [queues, setQueues] = useState<DownloadQueue[]>([])
   const [segmentCount, setSegmentCount] = useState(4)
+  const [completedDoubleClickAction, setCompletedDoubleClickAction] =
+    useState<CompletedDoubleClickAction>('open-file')
   const initialQueue = params.get('queueId') ?? ''
   useEffect(() => {
     window.downloads.listQueues().then(setQueues)
     window.downloads.getSegmentCount().then(setSegmentCount)
+    window.downloads.getCompletedDoubleClickAction().then(setCompletedDoubleClickAction)
   }, [])
   if (mode === 'youtube' || mode === 'instagram') return <SocialDownloadWindow platform={mode} />
   if (mode === 'add')
@@ -130,8 +137,12 @@ function UtilityDialogWindow({
       <div className="native-dialog-host">
         <OptionsDialog
           segmentCount={segmentCount}
-          onSave={async (value) => {
-            await window.downloads.setSegmentCount(value)
+          completedDoubleClickAction={completedDoubleClickAction}
+          onSave={async (segments, doubleClickAction) => {
+            await Promise.all([
+              window.downloads.setSegmentCount(segments),
+              window.downloads.setCompletedDoubleClickAction(doubleClickAction),
+            ])
             window.close()
           }}
           onClose={() => window.close()}
@@ -769,13 +780,17 @@ function useDialogDrag() {
 
 function ProgressWindow({ id }: { id: string }) {
   const [item, setItem] = useState<DownloadItem>()
+  const [loaded, setLoaded] = useState(false)
   useEffect(() => {
-    window.downloads.list().then((items) => setItem(items.find((value) => value.id === id)))
+    window.downloads
+      .list()
+      .then((items) => setItem(items.find((value) => value.id === id)))
+      .finally(() => setLoaded(true))
     return window.downloads.onChanged((items) => setItem(items.find((value) => value.id === id)))
   }, [id])
   return (
-    <div className="progress-window-root">
-      {item ? (
+    <div className="progress-window-root" data-content-ready={loaded}>
+      {!loaded ? null : item ? (
         item.status === 'completed' ? (
           <CompletedDownload item={item} />
         ) : (
@@ -842,15 +857,26 @@ function MainApp() {
     [tasksMenu, setTasksMenu] = useState(false),
     [deleteConfirm, setDeleteConfirm] = useState<DownloadItem[]>(),
     [segmentCount, setSegmentCount] = useState(4),
+    [completedDoubleClickAction, setCompletedDoubleClickAction] =
+      useState<CompletedDoubleClickAction>('open-file'),
     [fileSegments, setFileSegments] = useState(4),
     [context, setContext] = useState<{ x: number; y: number; item: DownloadItem }>(),
     [url, setUrl] = useState(''),
     [error, setError] = useState(''),
     [preview, setPreview] = useState<DownloadPreview>(),
-    [inspecting, setInspecting] = useState(false)
+    [inspecting, setInspecting] = useState(false),
+    [linkDragActive, setLinkDragActive] = useState(false),
+    [dropMessage, setDropMessage] = useState('')
+  const linkDragDepth = useRef(0)
+  useEffect(() => {
+    if (!dropMessage) return
+    const timer = window.setTimeout(() => setDropMessage(''), 3500)
+    return () => window.clearTimeout(timer)
+  }, [dropMessage])
   useEffect(() => {
     window.downloads.list().then(setItems)
     window.downloads.getSegmentCount().then(setSegmentCount)
+    window.downloads.getCompletedDoubleClickAction().then(setCompletedDoubleClickAction)
     window.downloads.listQueues().then((value) => {
       setQueues(value)
       if (value[0]) setSelectedQueue(value[0].id)
@@ -861,6 +887,7 @@ function MainApp() {
     const refreshSettings = () => {
       window.downloads.listQueues().then(setQueues)
       window.downloads.getSegmentCount().then(setSegmentCount)
+      window.downloads.getCompletedDoubleClickAction().then(setCompletedDoubleClickAction)
     }
     window.addEventListener('focus', refreshSettings)
     return () => window.removeEventListener('focus', refreshSettings)
@@ -1025,11 +1052,60 @@ function MainApp() {
   const stopAll = () =>
     items.filter((i) => i.status === 'downloading').forEach((i) => window.downloads.pause(i.id))
   const openItem = (item: DownloadItem) =>
-    item.status === 'completed'
+    item.status === 'completed' && completedDoubleClickAction === 'open-file'
       ? window.downloads.open(item.id)
       : window.downloads.showProgress(item.id)
   return (
-    <div className="idm-app">
+    <div
+      className="idm-app"
+      onDragEnter={(event) => {
+        if (!event.dataTransfer.types.some((type) => ['text/uri-list', 'text/html'].includes(type)))
+          return
+        event.preventDefault()
+        linkDragDepth.current += 1
+        setLinkDragActive(true)
+      }}
+      onDragOver={(event) => {
+        if (!event.dataTransfer.types.some((type) => ['text/uri-list', 'text/html'].includes(type)))
+          return
+        event.preventDefault()
+        event.dataTransfer.dropEffect = 'copy'
+      }}
+      onDragLeave={() => {
+        linkDragDepth.current = Math.max(0, linkDragDepth.current - 1)
+        if (!linkDragDepth.current) setLinkDragActive(false)
+      }}
+      onDrop={(event) => {
+        if (!event.dataTransfer.types.some((type) => ['text/uri-list', 'text/html'].includes(type)))
+          return
+        linkDragDepth.current = 0
+        setLinkDragActive(false)
+        const droppedUrl = droppedDownloadUrl({
+          uriList: event.dataTransfer.getData('text/uri-list'),
+          plainText: event.dataTransfer.getData('text/plain'),
+          html: event.dataTransfer.getData('text/html'),
+        })
+        if (!droppedUrl) {
+          setDropMessage('That drop did not contain an HTTP or HTTPS link.')
+          return
+        }
+        event.preventDefault()
+        setError('')
+        setPreview(undefined)
+        setUrl(droppedUrl)
+        setDialog(true)
+      }}
+    >
+      {linkDragActive && (
+        <div className="link-drop-overlay" aria-hidden="true">
+          <span>
+            <Link2 size={30} />
+          </span>
+          <strong>Drop link to add download</strong>
+          <small>You’ll review the filename and destination before it starts.</small>
+        </div>
+      )}
+      {dropMessage && <div className="drop-message">{dropMessage}</div>}
       <div className="titlebar">
         <span>
           <HardDriveDownload size={20} /> <b>NEXUS</b>
@@ -1218,6 +1294,13 @@ function MainApp() {
           title="Download permitted media from YouTube"
           onClick={() => window.downloads.showUtilityWindow('youtube')}
         />
+        <Tool
+          icon={<History />}
+          label="Media History"
+          color="gray"
+          title="Open YouTube and Instagram download history"
+          onClick={() => window.downloads.showUtilityWindow('social-history')}
+        />
       </div>
       <div
         className="workspace"
@@ -1266,6 +1349,9 @@ function MainApp() {
         <button onClick={() => window.downloads.openFolder()}>
           <FolderOpen size={13} /> Downloads
         </button>
+        <span className="drop-link-hint">
+          <Link2 size={13} /> Drop a Chrome link anywhere
+        </span>
       </div>
       {dialog && (
         <div className="dialog-shade" onMouseDown={() => setDialog(false)}>
@@ -1408,9 +1494,14 @@ function MainApp() {
       {options && (
         <OptionsDialog
           segmentCount={segmentCount}
-          onSave={async (value) => {
-            await window.downloads.setSegmentCount(value)
-            setSegmentCount(value)
+          completedDoubleClickAction={completedDoubleClickAction}
+          onSave={async (segments, doubleClickAction) => {
+            await Promise.all([
+              window.downloads.setSegmentCount(segments),
+              window.downloads.setCompletedDoubleClickAction(doubleClickAction),
+            ])
+            setSegmentCount(segments)
+            setCompletedDoubleClickAction(doubleClickAction)
             setOptions(false)
           }}
           onClose={() => setOptions(false)}
@@ -1424,7 +1515,9 @@ function MainApp() {
         >
           <button
             onClick={() => {
-              openItem(context.item)
+              context.item.status === 'completed'
+                ? window.downloads.open(context.item.id)
+                : window.downloads.showProgress(context.item.id)
               setContext(undefined)
             }}
           >
@@ -1771,15 +1864,19 @@ function SchedulerDialog({
 
 function OptionsDialog({
   segmentCount,
+  completedDoubleClickAction,
   onSave,
   onClose,
 }: {
   segmentCount: number
-  onSave: (value: number) => void
+  completedDoubleClickAction: CompletedDoubleClickAction
+  onSave: (segments: number, doubleClickAction: CompletedDoubleClickAction) => void
   onClose: () => void
 }) {
   const [segments, setSegments] = useState(segmentCount)
+  const [doubleClickAction, setDoubleClickAction] = useState(completedDoubleClickAction)
   useEffect(() => setSegments(segmentCount), [segmentCount])
+  useEffect(() => setDoubleClickAction(completedDoubleClickAction), [completedDoubleClickAction])
   return (
     <div className="dialog-shade">
       <div className="window-dialog options-dialog">
@@ -1823,6 +1920,22 @@ function OptionsDialog({
               downloads.
             </small>
           </section>
+          <section className="preference-card">
+            <h3>Completed download double-click</h3>
+            <p>Choose what happens when you double-click a completed item in the download list.</p>
+            <label htmlFor="completed-double-click">Double-click action</label>
+            <select
+              id="completed-double-click"
+              value={doubleClickAction}
+              onChange={(event) =>
+                setDoubleClickAction(event.target.value as CompletedDoubleClickAction)
+              }
+            >
+              <option value="open-file">Open the downloaded file</option>
+              <option value="show-dialog">Show the completed download dialog</option>
+            </select>
+            <small>Unfinished downloads always open their download details.</small>
+          </section>
           <section className="preference-card preference-folder">
             <div>
               <h3>Your download folder</h3>
@@ -1842,7 +1955,7 @@ function OptionsDialog({
         </div>
         <div className="dialog-actions">
           <button onClick={onClose}>Cancel</button>
-          <button className="primary" onClick={() => onSave(segments)}>
+          <button className="primary" onClick={() => onSave(segments, doubleClickAction)}>
             Save preferences
           </button>
         </div>

@@ -94,6 +94,10 @@ export function registerDownloadHandlers(
   })
   ipcMain.handle(IPC.getSegments, () => service.getSegmentCount())
   ipcMain.handle(IPC.setSegments, (_e, value: number) => service.setSegmentCount(value))
+  ipcMain.handle(IPC.getCompletedDoubleClickAction, () => service.getCompletedDoubleClickAction())
+  ipcMain.handle(IPC.setCompletedDoubleClickAction, (_e, value) =>
+    service.setCompletedDoubleClickAction(value),
+  )
   ipcMain.handle(IPC.setItemSegments, (_e, id: string, value: number) =>
     service.setItemSegmentCount(id, value),
   )

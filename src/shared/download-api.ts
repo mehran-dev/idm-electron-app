@@ -1,5 +1,6 @@
 import type {
   SocialDownloadRecord,
+  CompletedDoubleClickAction,
   CompletionOptions,
   DownloadItem,
   DownloadPreview,
@@ -40,6 +41,8 @@ export const IPC = {
   deleteFromDisk: 'downloads:delete-disk',
   getSegments: 'settings:get-segments',
   setSegments: 'settings:set-segments',
+  getCompletedDoubleClickAction: 'settings:get-completed-double-click-action',
+  setCompletedDoubleClickAction: 'settings:set-completed-double-click-action',
   setItemSegments: 'downloads:set-segments',
   listQueues: 'queues:list',
   createQueue: 'queues:create',
@@ -56,7 +59,7 @@ export const IPC = {
 } as const
 export interface DownloadApi {
   windowAction(action: 'minimize' | 'maximize' | 'close'): Promise<void>
-  fitWindow(height: number): Promise<void>
+  fitWindow(height: number): Promise<{ clamped: boolean }>
   version: number
   list(): Promise<DownloadItem[]>
   inspect(url: string): Promise<DownloadPreview>
@@ -107,6 +110,8 @@ export interface DownloadApi {
   deleteFromDisk(id: string): Promise<void>
   getSegmentCount(): Promise<number>
   setSegmentCount(value: number): Promise<void>
+  getCompletedDoubleClickAction(): Promise<CompletedDoubleClickAction>
+  setCompletedDoubleClickAction(value: CompletedDoubleClickAction): Promise<void>
   setItemSegmentCount(id: string, value: number): Promise<void>
   listQueues(): Promise<DownloadQueue[]>
   createQueue(name: string, concurrency: number): Promise<DownloadQueue>

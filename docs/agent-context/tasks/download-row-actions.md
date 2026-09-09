@@ -5,6 +5,7 @@ Status: complete
 ## Outcome
 
 Completed rows open their file on double-click, unfinished rows show their progress, and actions that require an existing file are unavailable until completion.
+Users can instead choose to show the completed-download dialog from Preferences.
 
 ## Scope
 
@@ -16,6 +17,7 @@ Download table primary actions, its context menu, file-action IPC guards, and fi
 - [x] Unfinished downloads do not offer a misleading folder action.
 - [x] The context menu is readable and remains inside the viewport.
 - [x] Finite dialogs measure their full intrinsic content.
+- [x] The completed-row double-click action is user-selectable and persists across restarts.
 
 ## Context to read
 
@@ -36,7 +38,7 @@ The saved destination is only treated as an openable file after the record reach
 
 ## Progress and evidence
 
-`npm run check`, the duplicate/import tests, and `npm run build` pass. Interactive desktop behavior was not inspected in this environment.
+`npm run check`, the preference/duplicate/import tests, and `npm run build` pass. Interactive desktop behavior was not inspected in this environment.
 
 ## Next action
 

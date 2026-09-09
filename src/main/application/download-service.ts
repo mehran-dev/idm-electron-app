@@ -1,6 +1,11 @@
 import { randomUUID } from 'node:crypto'
 import { basename, dirname, join, resolve } from 'node:path'
-import type { CompletionOptions, DownloadItem, DownloadQueue } from '../../shared/download'
+import type {
+  CompletedDoubleClickAction,
+  CompletionOptions,
+  DownloadItem,
+  DownloadQueue,
+} from '../../shared/download'
 import type { DownloadRepository } from '../domain/download-repository'
 import type { ElectronDownloadEngine } from '../infrastructure/electron-download-engine'
 
@@ -37,6 +42,11 @@ export class DownloadService {
   getSegmentCount = () => this.repo.getSegmentCount()
   setSegmentCount = (value: number) =>
     this.repo.setSegmentCount(Number.isInteger(value) && value >= 1 && value <= 8 ? value : 4)
+  getCompletedDoubleClickAction = () => this.repo.getCompletedDoubleClickAction()
+  setCompletedDoubleClickAction = (value: CompletedDoubleClickAction) =>
+    this.repo.setCompletedDoubleClickAction(
+      ['open-file', 'show-dialog'].includes(value) ? value : 'open-file',
+    )
   setItemSegmentCount = (id: string, value: number) => {
     const item = this.repo.get(id)
     if (!item || this.engine.isActive(id)) return

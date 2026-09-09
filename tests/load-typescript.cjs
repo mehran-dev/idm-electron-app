@@ -11,6 +11,8 @@ module.exports = (file, overrides = {}) => {
     require: (name) => overrides[name] ?? require(name),
     console,
     URL,
+    setTimeout,
+    clearTimeout,
   })
   return exports
 }

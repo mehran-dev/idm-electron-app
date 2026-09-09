@@ -2,7 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 import { IPC, type DownloadApi, type DownloadItem } from '../shared/download'
 const api: DownloadApi = {
   windowAction: (action) => ipcRenderer.invoke(IPC.windowAction, action),
-  version: 11,
+  version: 12,
   fitWindow: (height) => ipcRenderer.invoke(IPC.fitWindow, height),
   listSocialHistory: () => ipcRenderer.invoke(IPC.listSocialHistory),
   socialHistoryAction: (id, action) => ipcRenderer.invoke(IPC.socialHistoryAction, id, action),
@@ -47,6 +47,9 @@ const api: DownloadApi = {
   deleteFromDisk: (id) => ipcRenderer.invoke(IPC.deleteFromDisk, id),
   getSegmentCount: () => ipcRenderer.invoke(IPC.getSegments),
   setSegmentCount: (value) => ipcRenderer.invoke(IPC.setSegments, value),
+  getCompletedDoubleClickAction: () => ipcRenderer.invoke(IPC.getCompletedDoubleClickAction),
+  setCompletedDoubleClickAction: (value) =>
+    ipcRenderer.invoke(IPC.setCompletedDoubleClickAction, value),
   setItemSegmentCount: (id, value) => ipcRenderer.invoke(IPC.setItemSegments, id, value),
   listQueues: () => ipcRenderer.invoke(IPC.listQueues),
   createQueue: (name, concurrency) => ipcRenderer.invoke(IPC.createQueue, name, concurrency),

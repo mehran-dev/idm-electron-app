@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
-import type { DownloadItem, DownloadQueue } from '../../shared/download'
+import type { CompletedDoubleClickAction, DownloadItem, DownloadQueue } from '../../shared/download'
 import type { DownloadRepository } from '../domain/download-repository'
 
 const WRITE_DELAY_MS = 500
@@ -8,6 +8,7 @@ export class JsonDownloadRepository implements DownloadRepository {
   private readonly items = new Map<string, DownloadItem>()
   private readonly queues = new Map<string, DownloadQueue>()
   private segmentCount = 4
+  private completedDoubleClickAction: CompletedDoubleClickAction = 'open-file'
   private writeTimer?: NodeJS.Timeout
 
   constructor(private readonly filePath: string) {
@@ -39,6 +40,11 @@ export class JsonDownloadRepository implements DownloadRepository {
     this.segmentCount = value
     this.scheduleWrite()
   }
+  getCompletedDoubleClickAction = () => this.completedDoubleClickAction
+  setCompletedDoubleClickAction = (value: CompletedDoubleClickAction) => {
+    this.completedDoubleClickAction = value
+    this.scheduleWrite()
+  }
 
   flush = () => {
     if (this.writeTimer) {
@@ -53,7 +59,10 @@ export class JsonDownloadRepository implements DownloadRepository {
           version: 3,
           downloads: this.all(),
           queues: this.allQueues(),
-          settings: { segmentCount: this.segmentCount },
+          settings: {
+            segmentCount: this.segmentCount,
+            completedDoubleClickAction: this.completedDoubleClickAction,
+          },
         },
         null,
         2,
@@ -74,7 +83,10 @@ export class JsonDownloadRepository implements DownloadRepository {
       const parsed = JSON.parse(readFileSync(this.filePath, 'utf8')) as {
         downloads?: DownloadItem[]
         queues?: DownloadQueue[]
-        settings?: { segmentCount?: number }
+        settings?: {
+          segmentCount?: number
+          completedDoubleClickAction?: CompletedDoubleClickAction
+        }
       }
       if (!Array.isArray(parsed.downloads)) throw new Error('Invalid downloads history format')
       for (const download of parsed.downloads) {
@@ -99,6 +111,9 @@ export class JsonDownloadRepository implements DownloadRepository {
         parsed.settings!.segmentCount! <= 8
       )
         this.segmentCount = parsed.settings!.segmentCount!
+      if (['open-file', 'show-dialog'].includes(parsed.settings?.completedDoubleClickAction ?? ''))
+        this.completedDoubleClickAction = parsed.settings!
+          .completedDoubleClickAction as CompletedDoubleClickAction
     } catch (error) {
       console.error('[Download history could not be loaded]', error)
     }
