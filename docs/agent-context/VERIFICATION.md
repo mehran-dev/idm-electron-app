@@ -19,6 +19,7 @@ npm run build
 node --test tests/social-download-history.test.cjs
 node --test tests/youtube-session.test.cjs
 node --experimental-strip-types --test tests/social-download-environment.test.mjs
+node --test tests/social-download-tools.test.cjs
 node --test tests/download-engine.cjs
 ```
 

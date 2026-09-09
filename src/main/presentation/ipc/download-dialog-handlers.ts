@@ -23,6 +23,7 @@ import {
   socialDownloadEnvironment,
   hasCertificateError,
 } from '../../infrastructure/social-download-environment'
+import { resolveSocialDownloadTools } from '../../infrastructure/social-download-tools'
 import { IPC, type DownloadPreview } from '../../../shared/download'
 import type { DownloadService } from '../../application/download-service'
 import { centeredContentBounds } from '../window-fit'
@@ -403,18 +404,14 @@ export function registerDownloadDialogHandlers(
           socialFilesByWebContents.delete(event.sender.id)
         })
         mkdirSync(destination, { recursive: true })
-        const executableName = process.platform === 'win32' ? 'yt-dlp.exe' : 'yt-dlp'
-        const executable =
-          [
-            join(app.getAppPath(), 'vendor', executableName),
-            join(process.resourcesPath, 'vendor', executableName),
-          ].find(existsSync) ?? executableName
-        const ffmpegDirectory = [
-          join(app.getAppPath(), 'vendor'),
-          join(process.resourcesPath, 'vendor'),
-        ].find((directory) =>
-          existsSync(join(directory, process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg')),
-        )
+        const {
+          downloader: executable,
+          ffmpegDirectory,
+          hasFfmpeg,
+        } = resolveSocialDownloadTools({
+          appPath: app.getAppPath(),
+          resourcesPath: process.resourcesPath,
+        })
         // Child processes do not inherit Chromium's system/PAC proxy resolution.
         // Keep explicit environment proxy settings under yt-dlp's control.
         let systemProxy: string | undefined
@@ -519,9 +516,9 @@ export function registerDownloadDialogHandlers(
                 '--concurrent-fragments',
                 '4',
                 '-f',
-                'bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best',
-                '--merge-output-format',
-                'mp4',
+                hasFfmpeg
+                  ? 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best'
+                  : 'best[ext=mp4]/best',
                 '-P',
                 destination,
                 '-o',
@@ -531,6 +528,7 @@ export function registerDownloadDialogHandlers(
                 '--no-quiet',
                 url.href,
               ]
+              if (hasFfmpeg) args.splice(args.indexOf('-P'), 0, '--merge-output-format', 'mp4')
               const downloadProxy = explicitProxy || systemProxy
               if (cookieFile) args.unshift('--cookies', cookieFile.path)
               if (browserCookies) args.unshift('--cookies-from-browser', browserCookies)
