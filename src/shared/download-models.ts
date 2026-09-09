@@ -61,3 +61,32 @@ export interface SocialDownloadRecord {
   status: 'downloading' | 'completed' | 'failed' | 'interrupted'
   filePath?: string
 }
+
+export interface YouTubeChannelSummary {
+  id: string
+  title: string
+  url: string
+  thumbnail?: string
+}
+
+export interface YouTubePlaylistSummary {
+  id: string
+  title: string
+  url: string
+  thumbnail?: string
+  videoCount?: number
+}
+
+export interface YouTubeVideoSummary {
+  id: string
+  title: string
+  url: string
+  thumbnail?: string
+  duration?: number
+  unavailable?: boolean
+}
+
+export type YouTubeBrowseResult =
+  | { kind: 'channels'; title: string; channels: YouTubeChannelSummary[] }
+  | { kind: 'playlists'; title: string; playlists: YouTubePlaylistSummary[] }
+  | { kind: 'videos'; title: string; videos: YouTubeVideoSummary[] }

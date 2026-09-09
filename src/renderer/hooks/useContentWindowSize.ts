@@ -4,6 +4,7 @@ import { useLayoutEffect } from 'react'
 export function useContentWindowSize() {
   useLayoutEffect(() => {
     const params = new URLSearchParams(location.search)
+    if (params.get('utilityDialog') === 'youtube') return
     if (
       (!params.has('utilityDialog') && !params.has('listDialog') && !params.has('progress')) ||
       params.get('utilityDialog') === 'social-history'

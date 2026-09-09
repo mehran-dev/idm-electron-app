@@ -2,6 +2,7 @@ import { DuplicateNotice } from './features/add-download/DuplicateNotice'
 import { droppedDownloadUrl } from './features/add-download/dropped-url'
 import { useContentWindowSize } from './hooks/useContentWindowSize'
 import { SocialHistoryWindow } from './features/social-history/SocialHistoryWindow'
+import { YouTubeBrowserWindow } from './features/youtube-browser/YouTubeBrowserWindow'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Archive,
@@ -97,12 +98,19 @@ function UtilityDialogWindow({
   const [completedDoubleClickAction, setCompletedDoubleClickAction] =
     useState<CompletedDoubleClickAction>('open-file')
   const initialQueue = params.get('queueId') ?? ''
+  const [youtubeSingleVideo, setYoutubeSingleVideo] = useState(false)
   useEffect(() => {
     window.downloads.listQueues().then(setQueues)
     window.downloads.getSegmentCount().then(setSegmentCount)
     window.downloads.getCompletedDoubleClickAction().then(setCompletedDoubleClickAction)
   }, [])
-  if (mode === 'youtube' || mode === 'instagram') return <SocialDownloadWindow platform={mode} />
+  if (mode === 'youtube')
+    return youtubeSingleVideo ? (
+      <SocialDownloadWindow platform="youtube" onBrowse={() => setYoutubeSingleVideo(false)} />
+    ) : (
+      <YouTubeBrowserWindow onSingleVideo={() => setYoutubeSingleVideo(true)} />
+    )
+  if (mode === 'instagram') return <SocialDownloadWindow platform="instagram" />
   if (mode === 'add')
     return (
       <AddDownloadWindow queues={queues} segmentCount={segmentCount} initialQueue={initialQueue} />
@@ -152,7 +160,13 @@ function UtilityDialogWindow({
   return <DeleteFilesWindow ids={params.get('ids')?.split(',').filter(Boolean) ?? []} />
 }
 
-function SocialDownloadWindow({ platform }: { platform: 'youtube' | 'instagram' }) {
+function SocialDownloadWindow({
+  platform,
+  onBrowse,
+}: {
+  platform: 'youtube' | 'instagram'
+  onBrowse?: () => void
+}) {
   const [url, setUrl] = useState('')
   const [proxyUrl, setProxyUrl] = useState('')
   const [completed, setCompleted] = useState(false)
@@ -315,6 +329,9 @@ function SocialDownloadWindow({ platform }: { platform: 'youtube' | 'instagram' 
           )}
         </div>
         <div className="dialog-actions">
+          {platform === 'youtube' && onBrowse && !downloading && !completed && (
+            <button onClick={onBrowse}>Browse channels & playlists</button>
+          )}
           <button
             className="social-history-link"
             onClick={() => window.downloads.showUtilityWindow('social-history')}

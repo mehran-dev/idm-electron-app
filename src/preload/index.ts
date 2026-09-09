@@ -2,7 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 import { IPC, type DownloadApi, type DownloadItem } from '../shared/download'
 const api: DownloadApi = {
   windowAction: (action) => ipcRenderer.invoke(IPC.windowAction, action),
-  version: 12,
+  version: 13,
   fitWindow: (height) => ipcRenderer.invoke(IPC.fitWindow, height),
   listSocialHistory: () => ipcRenderer.invoke(IPC.listSocialHistory),
   socialHistoryAction: (id, action) => ipcRenderer.invoke(IPC.socialHistoryAction, id, action),
@@ -28,6 +28,7 @@ const api: DownloadApi = {
     return () => ipcRenderer.removeListener(IPC.socialProgress, handler)
   },
   getSocialProgress: () => ipcRenderer.invoke(IPC.getSocialProgress),
+  browseYouTube: (input) => ipcRenderer.invoke(IPC.browseYouTube, input),
   add: (url, queued = false, queueId, segments, path) =>
     queued
       ? ipcRenderer.invoke(IPC.enqueue, url, queueId, segments, path)

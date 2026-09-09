@@ -7,6 +7,7 @@ import type {
   DownloadQueue,
   ExportResult,
   ImportResult,
+  YouTubeBrowseResult,
 } from './download-models'
 export const IPC = {
   windowAction: 'window:action',
@@ -25,6 +26,7 @@ export const IPC = {
   showSocialFileInFolder: 'downloads:show-social-file-in-folder',
   socialProgress: 'downloads:social-progress',
   getSocialProgress: 'downloads:get-social-progress',
+  browseYouTube: 'downloads:browse-youtube',
   add: 'downloads:add',
   startNow: 'downloads:start-now',
   enqueue: 'downloads:enqueue',
@@ -84,6 +86,7 @@ export interface DownloadApi {
   showSocialFileInFolder(): Promise<void>
   onSocialProgress(listener: (value: { percent: number; status: string }) => void): () => void
   getSocialProgress(): Promise<{ percent: number; status: string }>
+  browseYouTube(input: string): Promise<YouTubeBrowseResult>
   add(
     url: string,
     queued?: boolean,

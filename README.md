@@ -50,6 +50,20 @@ The sign-in page has no app preload or Node access. Only YouTube-domain cookies 
 
 If Google refuses embedded sign-in, close the sign-in window and choose Firefox or Chrome in the fallback dialog after signing in there. Browser cookies are read only after you choose that option. Login, two-factor authentication, and verification must be completed by you; cookies do not guarantee that YouTube will accept the network connection. See [yt-dlp’s cookie guidance](https://github.com/yt-dlp/yt-dlp/wiki/Extractors#exporting-youtube-cookies).
 
+## YouTube channel and playlist browser
+
+Open **YouTube** to search for a channel by name, enter an `@handle`, or paste a channel or
+playlist URL. Channel-name searches show explicit matches; choosing a channel shows its public
+playlists, and choosing a playlist opens a selectable video list. Use **Select all** or choose
+individual available videos, then download the selection. The resizable browser keeps long lists
+inside a scrollable results area. **Download one video** retains the focused single-link workflow
+and its proxy and sign-in controls.
+
+Nexus uses the bundled yt-dlp metadata extractor for discovery and does not contain a YouTube Data
+API key. Private, deleted, and otherwise unavailable entries cannot be selected. Selected videos
+download sequentially and each attempt is recorded in media history; if one fails, the remaining
+batch stops so the failure can be addressed before retrying.
+
 ## Working with coding agents
 
 Start with [AGENTS.md](AGENTS.md) for project instructions and the [context engineering guide](docs/agent-context/README.md) for an explanation of the harness, reusable task templates, and optional Codex configuration.

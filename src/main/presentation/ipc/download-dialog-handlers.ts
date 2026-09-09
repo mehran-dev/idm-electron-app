@@ -10,10 +10,12 @@ import {
   session,
   shell,
   screen,
+  type WebContents,
 } from 'electron'
 import { basename, join } from 'node:path'
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { spawn } from 'node:child_process'
+import type { YouTubeBrowseResult } from '../../../shared/download'
 import {
   exportYouTubeCookies,
   signInToYouTube,
@@ -28,6 +30,168 @@ import type { DownloadService } from '../../application/download-service'
 import { centeredContentBounds } from '../window-fit'
 const socialProgressByWebContents = new Map<number, { percent: number; status: string }>()
 const socialFilesByWebContents = new Map<number, string>()
+const ytDlpExecutable = () => {
+  const name = process.platform === 'win32' ? 'yt-dlp.exe' : 'yt-dlp'
+  return (
+    [join(app.getAppPath(), 'vendor', name), join(process.resourcesPath, 'vendor', name)].find(
+      existsSync,
+    ) ?? name
+  )
+}
+
+const thumbnailOf = (value: Record<string, unknown>) => {
+  if (typeof value.thumbnail === 'string') return value.thumbnail
+  const thumbnails = Array.isArray(value.thumbnails) ? value.thumbnails : []
+  return thumbnails
+    .map((item) => (item && typeof item === 'object' ? (item as { url?: unknown }).url : undefined))
+    .filter((url): url is string => typeof url === 'string')
+    .at(-1)
+}
+
+function runYouTubeMetadata(input: string, owner: WebContents): Promise<YouTubeBrowseResult> {
+  if (typeof input !== 'string') return Promise.reject(new Error('Enter a channel or playlist.'))
+  const raw = input.trim()
+  if (!raw || raw.length > 2_048) return Promise.reject(new Error('Enter a channel or playlist.'))
+  let target = raw
+  let directUrl: URL | undefined
+  try {
+    directUrl = new URL(raw.startsWith('@') ? `https://www.youtube.com/${raw}` : raw)
+  } catch {
+    directUrl = undefined
+  }
+  if (directUrl && !/(^|\.)youtube\.com$|(^|\.)youtu\.be$/i.test(directUrl.hostname))
+    return Promise.reject(new Error('Enter a YouTube channel, handle, or playlist.'))
+  const isPlaylist = Boolean(directUrl?.searchParams.get('list'))
+  const isChannel = Boolean(
+    directUrl &&
+    (/^\/(?:@|channel\/|c\/|user\/)/i.test(directUrl.pathname) ||
+      /\/(?:videos|playlists)\/?$/i.test(directUrl.pathname)),
+  )
+  if (directUrl && !isPlaylist && !isChannel)
+    return Promise.reject(
+      new Error('That looks like a video URL. Choose “Download one video” for individual links.'),
+    )
+  if (directUrl && isChannel && !isPlaylist) {
+    directUrl.pathname = `${directUrl.pathname.replace(/\/(videos|playlists)\/?$/i, '').replace(/\/$/, '')}/playlists`
+    directUrl.search = ''
+    target = directUrl.href
+  } else if (!directUrl) target = `ytsearch12:${raw}`
+
+  return new Promise((resolve, reject) => {
+    const child = spawn(
+      ytDlpExecutable(),
+      [
+        '--ignore-config',
+        '--flat-playlist',
+        '--skip-download',
+        '--dump-single-json',
+        '--playlist-end',
+        '200',
+        '--socket-timeout',
+        '20',
+        '--js-runtimes',
+        `node:${process.execPath}`,
+        '--no-warnings',
+        target,
+      ],
+      { stdio: ['ignore', 'pipe', 'pipe'], env: socialDownloadEnvironment(process.env) },
+    )
+    const cancel = () => child.kill()
+    owner.once('destroyed', cancel)
+    let stdout = ''
+    let stderr = ''
+    child.stdout.on('data', (chunk) => (stdout += String(chunk)))
+    child.stderr.on('data', (chunk) => (stderr += String(chunk)))
+    child.once('error', (error) =>
+      reject(
+        new Error(
+          error.message.includes('ENOENT')
+            ? 'The bundled yt-dlp executable could not be found.'
+            : error.message,
+        ),
+      ),
+    )
+    child.once('close', (code) => {
+      owner.removeListener('destroyed', cancel)
+      if (code !== 0)
+        return reject(new Error(stderr.trim().split(/\r?\n/).at(-1) || 'YouTube lookup failed.'))
+      try {
+        const data = JSON.parse(stdout) as Record<string, unknown>
+        const entries = Array.isArray(data.entries)
+          ? data.entries.filter((entry): entry is Record<string, unknown> =>
+              Boolean(entry && typeof entry === 'object'),
+            )
+          : []
+        if (!directUrl) {
+          const channels = new Map<
+            string,
+            { id: string; title: string; url: string; thumbnail?: string }
+          >()
+          for (const entry of entries) {
+            const url = typeof entry.channel_url === 'string' ? entry.channel_url : ''
+            const id = typeof entry.channel_id === 'string' ? entry.channel_id : url
+            if (url && id && !channels.has(id))
+              channels.set(id, {
+                id,
+                title: typeof entry.channel === 'string' ? entry.channel : 'YouTube channel',
+                url,
+                thumbnail: thumbnailOf(entry),
+              })
+          }
+          return resolve({
+            kind: 'channels',
+            title: `Channels matching “${raw}”`,
+            channels: [...channels.values()],
+          })
+        }
+        const title = typeof data.title === 'string' ? data.title : 'YouTube'
+        if (isPlaylist) {
+          return resolve({
+            kind: 'videos',
+            title,
+            videos: entries.map((entry, index) => {
+              const id = typeof entry.id === 'string' ? entry.id : `item-${index}`
+              return {
+                id,
+                title: typeof entry.title === 'string' ? entry.title : 'Unavailable video',
+                url:
+                  typeof entry.url === 'string' && /^https?:/.test(entry.url)
+                    ? entry.url
+                    : `https://www.youtube.com/watch?v=${id}`,
+                thumbnail: thumbnailOf(entry),
+                duration: typeof entry.duration === 'number' ? entry.duration : undefined,
+                unavailable:
+                  !entry.id ||
+                  String(entry.title ?? '').startsWith('[Private video]') ||
+                  String(entry.title ?? '').startsWith('[Deleted video]'),
+              }
+            }),
+          })
+        }
+        return resolve({
+          kind: 'playlists',
+          title,
+          playlists: entries.map((entry, index) => {
+            const id = typeof entry.id === 'string' ? entry.id : `playlist-${index}`
+            return {
+              id,
+              title: typeof entry.title === 'string' ? entry.title : 'Untitled playlist',
+              url:
+                typeof entry.url === 'string' && /^https?:/.test(entry.url)
+                  ? entry.url
+                  : `https://www.youtube.com/playlist?list=${id}`,
+              thumbnail: thumbnailOf(entry),
+              videoCount:
+                typeof entry.playlist_count === 'number' ? entry.playlist_count : undefined,
+            }
+          }),
+        })
+      } catch {
+        reject(new Error('YouTube returned metadata that Nexus could not read.'))
+      }
+    })
+  })
+}
 const category = (name: string, mime: string) =>
   mime.startsWith('video/')
     ? 'Video'
@@ -157,6 +321,9 @@ export function registerDownloadDialogHandlers(
       socialProgressByWebContents.get(event.sender.id) ?? { percent: 0, status: 'Waiting…' },
     ),
   )
+  ipcMain.handle(IPC.browseYouTube, (event, input: string) =>
+    runYouTubeMetadata(input, event.sender),
+  )
   ipcMain.handle(IPC.getCompletionSound, () => savedSound())
   ipcMain.handle(IPC.chooseCompletionSound, async () => {
     const selected = await dialog.showOpenDialog({
@@ -261,7 +428,7 @@ export function registerDownloadDialogHandlers(
         scheduler: [680, 570],
         options: [760, 620],
         delete: [540, 300],
-        youtube: [570, 560],
+        youtube: [920, 700],
         instagram: [570, 490],
       } as const
       const titles = {
@@ -291,6 +458,7 @@ export function registerDownloadDialogHandlers(
         height,
         minWidth: Math.min(width, 500),
         minHeight: Math.min(height, 280),
+        resizable: mode === 'youtube' || mode === 'social-history',
         title: titles[mode],
         frame: false,
         autoHideMenuBar: true,
@@ -403,12 +571,7 @@ export function registerDownloadDialogHandlers(
           socialFilesByWebContents.delete(event.sender.id)
         })
         mkdirSync(destination, { recursive: true })
-        const executableName = process.platform === 'win32' ? 'yt-dlp.exe' : 'yt-dlp'
-        const executable =
-          [
-            join(app.getAppPath(), 'vendor', executableName),
-            join(process.resourcesPath, 'vendor', executableName),
-          ].find(existsSync) ?? executableName
+        const executable = ytDlpExecutable()
         const ffmpegDirectory = [
           join(app.getAppPath(), 'vendor'),
           join(process.resourcesPath, 'vendor'),
