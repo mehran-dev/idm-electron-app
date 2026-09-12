@@ -13,7 +13,25 @@ export function useContentWindowSize() {
     document.body.classList.add('content-sized-window', 'content-window-sizing')
     let frame = 0
     let previousHeight = 0
-    const contentHeight = () => Math.ceil(root.getBoundingClientRect().height)
+    const contentHeight = () => {
+      const dialog = root.querySelector<HTMLElement>('.window-dialog, .dialog')
+      if (!dialog?.children.length) return Math.ceil(root.getBoundingClientRect().height)
+      // Finite dialogs are vertical surfaces made from a title, body, and actions. Measuring the
+      // outer root can feed the old native viewport height back into Electron after content gets
+      // shorter. Summing the real sections works for every finite dialog and includes intentional
+      // margins without including flex filler or empty viewport space.
+      const sections = [...dialog.children].reduce((height, child) => {
+        const style = getComputedStyle(child)
+        return (
+          height +
+          child.getBoundingClientRect().height +
+          (Number.parseFloat(style.marginTop) || 0) +
+          (Number.parseFloat(style.marginBottom) || 0)
+        )
+      }, 0)
+      const frame = dialog.getBoundingClientRect().height - dialog.clientHeight
+      return Math.ceil(sections + Math.max(0, frame))
+    }
     const measure = () => {
       cancelAnimationFrame(frame)
       frame = requestAnimationFrame(() => {

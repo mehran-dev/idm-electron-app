@@ -37,6 +37,10 @@ import type { DownloadService } from '../../application/download-service'
 import { centeredContentBounds } from '../window-fit'
 const socialProgressByWebContents = new Map<number, { percent: number; status: string }>()
 const socialFilesByWebContents = new Map<number, string>()
+const socialProcessesByWebContents = new Map<number, Map<string, ReturnType<typeof spawn>>>()
+const pausedSocialTasks = new Set<string>()
+const activeSocialTasks = new Set<string>()
+const socialTaskKey = (webContentsId: number, taskId: string) => `${webContentsId}:${taskId}`
 const category = (name: string, mime: string) =>
   mime.startsWith('video/')
     ? 'Video'
@@ -336,6 +340,15 @@ export function registerDownloadDialogHandlers(
       socialProgressByWebContents.get(event.sender.id) ?? { percent: 0, status: 'Waiting…' },
     ),
   )
+  ipcMain.handle(IPC.pauseSocialDownload, (event, taskIdValue: string) => {
+    const taskId = typeof taskIdValue === 'string' ? taskIdValue.slice(0, 100) : ''
+    if (!taskId) return false
+    const key = socialTaskKey(event.sender.id, taskId)
+    if (!activeSocialTasks.has(key)) return false
+    pausedSocialTasks.add(key)
+    socialProcessesByWebContents.get(event.sender.id)?.get(taskId)?.kill()
+    return true
+  })
   ipcMain.handle(IPC.getCompletionSound, () => savedSound())
   ipcMain.handle(IPC.chooseCompletionSound, async () => {
     const selected = await dialog.showOpenDialog({
@@ -504,7 +517,7 @@ export function registerDownloadDialogHandlers(
       urlValue: string,
       allowInvalidCertificate = false,
       proxyUrl = '',
-      details: { title?: string; batchId?: string; batchTitle?: string } = {},
+      details: { title?: string; batchId?: string; batchTitle?: string; taskId?: string } = {},
     ) => {
       if (!['youtube', 'instagram'].includes(platform))
         return { ok: false as const, error: 'Unknown media provider.' }
@@ -555,6 +568,14 @@ export function registerDownloadDialogHandlers(
           }
         }
       }
+      const safeDetails = {
+        title: typeof details?.title === 'string' ? details.title.slice(0, 500) : undefined,
+        batchId: typeof details?.batchId === 'string' ? details.batchId.slice(0, 100) : undefined,
+        batchTitle:
+          typeof details?.batchTitle === 'string' ? details.batchTitle.slice(0, 500) : undefined,
+      }
+      const taskId = typeof details?.taskId === 'string' ? details.taskId.slice(0, 100) : ''
+      const taskKey = taskId ? socialTaskKey(event.sender.id, taskId) : ''
       let historyId: string
       try {
         const savedUrl = new URL(url.href)
@@ -566,12 +587,6 @@ export function registerDownloadDialogHandlers(
           platform === 'youtube' && savedUrl.searchParams.has('v')
             ? new URLSearchParams({ v: savedUrl.searchParams.get('v')! }).toString()
             : ''
-        const safeDetails = {
-          title: typeof details?.title === 'string' ? details.title.slice(0, 500) : undefined,
-          batchId: typeof details?.batchId === 'string' ? details.batchId.slice(0, 100) : undefined,
-          batchTitle:
-            typeof details?.batchTitle === 'string' ? details.batchTitle.slice(0, 500) : undefined,
-        }
         historyId = await history.start(platform, savedUrl.href, safeDetails)
       } catch {
         return {
@@ -580,6 +595,7 @@ export function registerDownloadDialogHandlers(
             'Could not save download history. Check available disk space and app data permissions.',
         }
       }
+      if (taskKey) activeSocialTasks.add(taskKey)
       const markInterrupted = () => {
         void history
           .finish(historyId, 'interrupted')
@@ -677,6 +693,7 @@ export function registerDownloadDialogHandlers(
                 event.sender.send(IPC.socialProgress, {
                   percent: Math.max(0, Math.min(100, percent)),
                   status,
+                  taskId: taskId || undefined,
                 })
               }
               reportProgress(
@@ -734,10 +751,21 @@ export function registerDownloadDialogHandlers(
               if (ffmpegDirectory) args.unshift('--ffmpeg-location', ffmpegDirectory)
               if (allowInvalidCertificate) args.unshift('--no-check-certificates')
               if (event.sender.isDestroyed()) throw new Error('Download window was closed.')
+              if (taskKey && pausedSocialTasks.delete(taskKey)) {
+                resolve({ ok: false, error: 'Download paused.' })
+                return
+              }
               const downloaderProcess = spawn(executable, args, {
                 stdio: ['ignore', 'pipe', 'pipe'],
                 env: socialDownloadEnvironment(process.env),
               })
+              if (taskId) {
+                const processes =
+                  socialProcessesByWebContents.get(event.sender.id) ??
+                  new Map<string, ReturnType<typeof spawn>>()
+                processes.set(taskId, downloaderProcess)
+                socialProcessesByWebContents.set(event.sender.id, processes)
+              }
               console.info('[social-download] spawned', {
                 senderId: event.sender.id,
                 pid: downloaderProcess.pid,
@@ -792,12 +820,22 @@ export function registerDownloadDialogHandlers(
               })
               downloaderProcess.once('close', (code) => {
                 event.sender.removeListener('destroyed', cancelDownload)
+                if (taskId) {
+                  const processes = socialProcessesByWebContents.get(event.sender.id)
+                  if (processes?.get(taskId) === downloaderProcess) processes.delete(taskId)
+                  if (processes?.size === 0) socialProcessesByWebContents.delete(event.sender.id)
+                }
+                const wasPaused = taskKey ? pausedSocialTasks.delete(taskKey) : false
                 console.info('[social-download] process closed', {
                   senderId: event.sender.id,
                   code,
                   finalPath,
                 })
                 if (failedToStart) return
+                if (wasPaused) {
+                  resolve({ ok: false, error: 'Download paused.' })
+                  return
+                }
                 const lines = output.join('').trim().split(/\r?\n/).filter(Boolean)
                 finalPath =
                   lines
@@ -881,11 +919,12 @@ export function registerDownloadDialogHandlers(
           }
         }
         const result = await runDownload()
-        await history.finish(
-          historyId,
-          result.ok ? 'completed' : event.sender.isDestroyed() ? 'interrupted' : 'failed',
-          result.ok ? result.filePath : undefined,
-        )
+        const historyStatus = result.ok
+          ? 'completed'
+          : event.sender.isDestroyed() || result.error === 'Download paused.'
+            ? 'interrupted'
+            : 'failed'
+        await history.finish(historyId, historyStatus, result.ok ? result.filePath : undefined)
         return result
       } catch (error) {
         await history
@@ -896,6 +935,10 @@ export function registerDownloadDialogHandlers(
           error: error instanceof Error ? error.message : 'Media download failed.',
         }
       } finally {
+        if (taskKey) {
+          activeSocialTasks.delete(taskKey)
+          pausedSocialTasks.delete(taskKey)
+        }
         event.sender.removeListener('destroyed', markInterrupted)
       }
     },

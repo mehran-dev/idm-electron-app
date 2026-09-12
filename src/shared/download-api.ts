@@ -1,5 +1,6 @@
 import type {
   SocialDownloadRecord,
+  SocialDownloadProgress,
   YouTubeCatalog,
   CompletedDoubleClickAction,
   CompletionOptions,
@@ -27,6 +28,7 @@ export const IPC = {
   showSocialFileInFolder: 'downloads:show-social-file-in-folder',
   socialProgress: 'downloads:social-progress',
   getSocialProgress: 'downloads:get-social-progress',
+  pauseSocialDownload: 'downloads:pause-social',
   add: 'downloads:add',
   startNow: 'downloads:start-now',
   enqueue: 'downloads:enqueue',
@@ -97,11 +99,12 @@ export interface DownloadApi {
     url: string,
     allowInvalidCertificate?: boolean,
     proxyUrl?: string,
-    details?: { title?: string; batchId?: string; batchTitle?: string },
+    details?: { title?: string; batchId?: string; batchTitle?: string; taskId?: string },
   ): Promise<{ ok: true; filePath: string } | { ok: false; error: string }>
+  pauseSocialDownload(taskId: string): Promise<boolean>
   openSocialFile(): Promise<string>
   showSocialFileInFolder(): Promise<void>
-  onSocialProgress(listener: (value: { percent: number; status: string }) => void): () => void
+  onSocialProgress(listener: (value: SocialDownloadProgress) => void): () => void
   getSocialProgress(): Promise<{ percent: number; status: string }>
   add(
     url: string,

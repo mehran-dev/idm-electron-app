@@ -5,7 +5,9 @@ import {
   Clock3,
   ExternalLink,
   ListVideo,
+  Pause,
   Play,
+  RotateCcw,
   Search,
   Square,
   Youtube,
@@ -18,6 +20,15 @@ interface RecentChannel extends YouTubeCatalog {
   kind: 'channel'
   searchedAt: string
 }
+
+interface VideoTransfer {
+  status: 'downloading' | 'stopping' | 'paused' | 'failed'
+  percent: number
+  message: string
+}
+
+const transferActive = (status?: VideoTransfer['status']) =>
+  status === 'downloading' || status === 'stopping'
 
 const duration = (seconds?: number) => {
   if (!seconds) return ''
@@ -78,11 +89,11 @@ export function YouTubeDownloadWindow() {
   const [history, setHistory] = useState<SocialDownloadRecord[]>([])
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [loading, setLoading] = useState(false)
-  const [downloading, setDownloading] = useState(false)
+  const [batching, setBatching] = useState(false)
+  const [transfers, setTransfers] = useState<Record<string, VideoTransfer>>({})
   const [message, setMessage] = useState('')
   const [proxy, setProxy] = useState('')
   const [allowInvalidCertificate, setAllowInvalidCertificate] = useState(false)
-  const [progress, setProgress] = useState({ percent: 0, status: '' })
 
   const refreshHistory = async () => {
     try {
@@ -92,13 +103,39 @@ export function YouTubeDownloadWindow() {
     }
   }
 
-  useEffect(() => window.downloads.onSocialProgress(setProgress), [])
+  useEffect(
+    () =>
+      window.downloads.onSocialProgress((value) => {
+        if (!value.taskId) return
+        setTransfers((current) => {
+          const transfer = current[value.taskId!]
+          if (!transfer || !transferActive(transfer.status)) return current
+          return {
+            ...current,
+            [value.taskId!]: {
+              ...transfer,
+              percent: value.percent,
+              message: value.status,
+            },
+          }
+        })
+      }),
+    [],
+  )
   useEffect(() => {
     void refreshHistory()
     window.addEventListener('focus', refreshHistory)
     return () => window.removeEventListener('focus', refreshHistory)
   }, [])
 
+  const historyByVideo = useMemo(() => {
+    const records = new Map<string, SocialDownloadRecord>()
+    for (const record of history) {
+      const id = videoId(record.url)
+      if (id && record.platform === 'youtube' && !records.has(id)) records.set(id, record)
+    }
+    return records
+  }, [history])
   const completedByVideo = useMemo(() => {
     const records = new Map<string, SocialDownloadRecord>()
     for (const record of history) {
@@ -114,6 +151,9 @@ export function YouTubeDownloadWindow() {
     () => videos.filter((video) => selected.has(video.id)),
     [selected, videos],
   )
+  const activeCount = Object.values(transfers).filter((transfer) =>
+    transferActive(transfer.status),
+  ).length
 
   const rememberChannel = (channel: YouTubeCatalog) => {
     if (channel.kind !== 'channel') return
@@ -188,46 +228,104 @@ export function YouTubeDownloadWindow() {
       return next
     })
 
-  const downloadVideos = async (items: typeof videos) => {
-    if (!catalog || items.length === 0) return
-    setDownloading(true)
-    const batchId = crypto.randomUUID()
-    let completed = 0
+  const startVideo = async (video: (typeof videos)[number], batchId = crypto.randomUUID()) => {
+    if (!catalog || transferActive(transfers[video.id]?.status)) return false
+    setTransfers((current) => ({
+      ...current,
+      [video.id]: { status: 'downloading', percent: 0, message: 'Preparing download…' },
+    }))
     try {
-      for (const [index, video] of items.entries()) {
-        setMessage(`Downloading ${index + 1} of ${items.length}: ${video.title}`)
-        const result = await window.downloads.downloadSocial(
-          'youtube',
-          video.url,
-          allowInvalidCertificate,
-          proxy.trim(),
-          { title: video.title, batchId, batchTitle: catalog.title },
-        )
-        if (!result.ok) {
-          setMessage(`Stopped after ${completed} completed. ${result.error}`)
-          break
-        }
-        completed += 1
+      const result = await window.downloads.downloadSocial(
+        'youtube',
+        video.url,
+        allowInvalidCertificate,
+        proxy.trim(),
+        { title: video.title, batchId, batchTitle: catalog.title, taskId: video.id },
+      )
+      if (result.ok) {
         await refreshHistory()
         setSelected((current) => {
           const next = new Set(current)
           next.delete(video.id)
           return next
         })
+        setTransfers((current) => {
+          const next = { ...current }
+          delete next[video.id]
+          return next
+        })
+        return true
       }
-      if (completed === items.length)
-        setMessage(
-          items.length === 1
-            ? 'Video downloaded and ready to open.'
-            : `Playlist download complete — ${completed} videos saved.`,
-        )
+      const paused = result.error === 'Download paused.'
+      setTransfers((current) => ({
+        ...current,
+        [video.id]: {
+          status: paused ? 'paused' : 'failed',
+          percent: current[video.id]?.percent ?? 0,
+          message: paused ? 'Paused — partial file kept' : result.error,
+        },
+      }))
+      return false
     } catch (error) {
-      setMessage(
-        error instanceof Error ? error.message : 'The YouTube download could not be started.',
-      )
-    } finally {
-      setDownloading(false)
+      const problem =
+        error instanceof Error ? error.message : 'The YouTube download could not be started.'
+      setTransfers((current) => ({
+        ...current,
+        [video.id]: {
+          status: 'failed',
+          percent: current[video.id]?.percent ?? 0,
+          message: problem,
+        },
+      }))
+      return false
     }
+  }
+
+  const downloadVideos = async (items: typeof videos) => {
+    if (!catalog || items.length === 0) return
+    const pending = items.filter(
+      (video) => !completedByVideo.has(video.id) && !transferActive(transfers[video.id]?.status),
+    )
+    if (!pending.length) return
+    setBatching(true)
+    setMessage(`Starting ${pending.length} selected video${pending.length === 1 ? '' : 's'}…`)
+    const batchId = crypto.randomUUID()
+    let cursor = 0
+    let completed = 0
+    const worker = async () => {
+      while (cursor < pending.length) {
+        const video = pending[cursor++]!
+        if (await startVideo(video, batchId)) completed += 1
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(3, pending.length) }, () => worker()))
+    setMessage(
+      completed === pending.length
+        ? `${completed} video${completed === 1 ? '' : 's'} downloaded.`
+        : `${completed} of ${pending.length} videos completed. Paused or failed videos remain in the list.`,
+    )
+    setBatching(false)
+  }
+
+  const stopVideo = async (video: (typeof videos)[number]) => {
+    setTransfers((current) => ({
+      ...current,
+      [video.id]: {
+        ...(current[video.id] ?? { percent: 0 }),
+        status: 'stopping',
+        message: 'Stopping safely…',
+      },
+    }))
+    const stopped = await window.downloads.pauseSocialDownload(video.id)
+    if (!stopped)
+      setTransfers((current) => ({
+        ...current,
+        [video.id]: {
+          status: 'failed',
+          percent: current[video.id]?.percent ?? 0,
+          message: 'The active process could not be stopped.',
+        },
+      }))
   }
 
   const openDownloaded = async (record: SocialDownloadRecord) => {
@@ -257,20 +355,20 @@ export function YouTubeDownloadWindow() {
               autoFocus
               aria-label="YouTube channel or playlist"
               value={input}
-              disabled={loading || downloading}
+              disabled={loading}
               placeholder="@channelname or https://youtube.com/playlist?list=…"
               onChange={(event) => setInput(event.target.value)}
               onKeyDown={(event) => event.key === 'Enter' && input.trim() && void inspect()}
             />
             <button
               className="primary"
-              disabled={!input.trim() || loading || downloading}
+              disabled={!input.trim() || loading}
               onClick={() => inspect()}
             >
               <Search size={16} /> {loading ? 'Finding…' : 'Find'}
             </button>
           </div>
-          {!downloading && (
+          {!loading && (
             <details className="youtube-advanced youtube-lookup-options">
               <summary>Connection options</summary>
               <input
@@ -379,7 +477,6 @@ export function YouTubeDownloadWindow() {
                       </small>
                     </div>
                     <button
-                      disabled={downloading}
                       onClick={() => {
                         const available = videos.filter((video) => !completedByVideo.has(video.id))
                         setSelected(
@@ -396,6 +493,8 @@ export function YouTubeDownloadWindow() {
                   <div className="youtube-video-list" role="list">
                     {videos.map((video, index) => {
                       const completed = completedByVideo.get(video.id)
+                      const priorAttempt = historyByVideo.get(video.id)
+                      const transfer = transfers[video.id]
                       return (
                         <div
                           key={video.id}
@@ -406,7 +505,7 @@ export function YouTubeDownloadWindow() {
                             aria-label={`Select ${video.title}`}
                             type="checkbox"
                             checked={selected.has(video.id)}
-                            disabled={downloading || Boolean(completed)}
+                            disabled={Boolean(completed) || transferActive(transfer?.status)}
                             onChange={() => toggle(video.id)}
                           />
                           <span className="youtube-video-number">
@@ -414,21 +513,54 @@ export function YouTubeDownloadWindow() {
                           </span>
                           <span className="youtube-video-title" title={video.title}>
                             {video.title}
-                            <small>{completed ? 'Downloaded' : duration(video.duration)}</small>
+                            {transfer ? (
+                              <span className={`youtube-row-progress ${transfer.status}`}>
+                                <span>
+                                  <small>{transfer.message}</small>
+                                  <b>
+                                    {transfer.percent > 0
+                                      ? `${transfer.percent.toFixed(0)}%`
+                                      : transfer.status === 'paused'
+                                        ? 'Paused'
+                                        : 'Preparing'}
+                                  </b>
+                                </span>
+                                <progress
+                                  aria-label={`${video.title} download progress`}
+                                  max="100"
+                                  value={transfer.percent || undefined}
+                                />
+                              </span>
+                            ) : (
+                              <small>
+                                {completed
+                                  ? 'Downloaded'
+                                  : ['failed', 'interrupted'].includes(priorAttempt?.status ?? '')
+                                    ? 'Partial download available'
+                                    : duration(video.duration)}
+                              </small>
+                            )}
                           </span>
                           {completed ? (
-                            <button
-                              disabled={downloading}
-                              onClick={() => openDownloaded(completed)}
-                            >
+                            <button onClick={() => openDownloaded(completed)}>
                               <ExternalLink size={14} /> Open file
                             </button>
-                          ) : (
+                          ) : transferActive(transfer?.status) ? (
                             <button
-                              className="primary"
-                              disabled={downloading}
-                              onClick={() => downloadVideos([video])}
+                              disabled={transfer?.status === 'stopping'}
+                              onClick={() => stopVideo(video)}
                             >
+                              <Pause size={14} />
+                              {transfer?.status === 'stopping' ? 'Stopping…' : 'Stop'}
+                            </button>
+                          ) : transfer?.status === 'paused' ||
+                            transfer?.status === 'failed' ||
+                            ['failed', 'interrupted'].includes(priorAttempt?.status ?? '') ? (
+                            <button className="primary" onClick={() => startVideo(video)}>
+                              <RotateCcw size={14} /> Resume
+                            </button>
+                          ) : (
+                            <button className="primary" onClick={() => startVideo(video)}>
                               <Play size={14} /> Download
                             </button>
                           )}
@@ -441,13 +573,6 @@ export function YouTubeDownloadWindow() {
             </section>
           </div>
 
-          {downloading && (
-            <div className="youtube-batch-progress">
-              <span>{progress.status || message}</span>
-              <b>{progress.percent > 0 ? `${progress.percent.toFixed(0)}%` : 'Preparing'}</b>
-              <progress max="100" value={progress.percent || undefined} />
-            </div>
-          )}
           {message && (
             <p className="youtube-message" role="status">
               {message}
@@ -464,13 +589,15 @@ export function YouTubeDownloadWindow() {
           {catalog?.kind === 'playlist' && (
             <button
               className="primary"
-              disabled={downloading || selectedVideos.length === 0}
+              disabled={batching || selectedVideos.length === 0}
               onClick={() => downloadVideos(selectedVideos)}
             >
-              {downloading ? 'Downloading queue…' : `Download ${selectedVideos.length} selected`}
+              {batching ? 'Starting selected…' : `Download ${selectedVideos.length} selected`}
             </button>
           )}
-          <button onClick={() => window.close()}>{downloading ? 'Stop and close' : 'Close'}</button>
+          <button onClick={() => window.close()}>
+            {activeCount ? `Stop ${activeCount} and close` : 'Close'}
+          </button>
         </div>
       </div>
     </div>

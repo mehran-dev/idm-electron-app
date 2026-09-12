@@ -83,3 +83,9 @@ export interface YouTubeCatalog {
   playlists: YouTubeCatalogItem[]
   videos: YouTubeCatalogItem[]
 }
+
+export interface SocialDownloadProgress {
+  percent: number
+  status: string
+  taskId?: string
+}

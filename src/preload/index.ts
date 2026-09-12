@@ -26,12 +26,13 @@ const api: DownloadApi = {
       proxyUrl,
       details,
     ),
+  pauseSocialDownload: (taskId) => ipcRenderer.invoke(IPC.pauseSocialDownload, taskId),
   openSocialFile: () => ipcRenderer.invoke(IPC.openSocialFile),
   showSocialFileInFolder: () => ipcRenderer.invoke(IPC.showSocialFileInFolder),
   onSocialProgress: (listener) => {
     const handler = (
       _event: Electron.IpcRendererEvent,
-      value: { percent: number; status: string },
+      value: { percent: number; status: string; taskId?: string },
     ) => listener(value)
     ipcRenderer.on(IPC.socialProgress, handler)
     return () => ipcRenderer.removeListener(IPC.socialProgress, handler)

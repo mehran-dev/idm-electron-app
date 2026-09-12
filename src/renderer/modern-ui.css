@@ -1388,10 +1388,44 @@ body::after {
   background: #f4faf8;
 }
 .youtube-video-title {
+  display: block;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.youtube-row-progress {
+  display: block;
+  margin-top: 5px;
+}
+.youtube-row-progress > span {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+.youtube-row-progress > span small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.youtube-row-progress > span b {
+  color: var(--accent);
+  font-size: 10px;
+}
+.youtube-row-progress progress {
+  display: block;
+  width: 100%;
+  height: 6px;
+  margin-top: 4px;
+  accent-color: var(--accent);
+}
+.youtube-row-progress.paused > span b {
+  color: #94621d;
+}
+.youtube-row-progress.failed > span small,
+.youtube-row-progress.failed > span b {
+  color: #a12828;
 }
 .youtube-video-title > small {
   display: block;
