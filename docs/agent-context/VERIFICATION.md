@@ -18,6 +18,8 @@ npm run build
 ```bash
 node --test tests/social-download-history.test.cjs
 node --test tests/youtube-session.test.cjs
+node --test tests/youtube-auth.test.cjs
+node --test tests/download-progress-actions.test.cjs
 node --experimental-strip-types --test tests/social-download-environment.test.mjs
 node --test tests/social-download-tools.test.cjs
 node --test tests/download-engine.cjs
@@ -27,6 +29,8 @@ The environment test imports TypeScript directly and needs a Node runtime suppor
 
 - History test: persistence, restart recovery, concurrent records, and preserving corrupt files.
 - Session test: cookie export filtering and formatting; does not prove real Google login works.
+- YouTube auth test: manual cookie domain filtering and persisted access-source selection.
+- Progress-action test: queued/active/paused/error/cancelled button labels and semantics.
 - Environment test: proxy/certificate environment handling; does not prove external connectivity.
 - Engine test: local HTTP server scenarios; requires permission to bind a local port and uses mocked Electron networking.
 

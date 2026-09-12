@@ -25,14 +25,21 @@ import {
   exportYouTubeCookies,
   signInToYouTube,
   forgetYouTubeSession,
+  hasYouTubeSession,
 } from '../../infrastructure/youtube-session'
+import { YouTubeAuthStore } from '../../infrastructure/youtube-auth'
 import {
   socialDownloadEnvironment,
   hasCertificateError,
   socialConnectionError,
 } from '../../infrastructure/social-download-environment'
 import { resolveSocialDownloadTools } from '../../infrastructure/social-download-tools'
-import { IPC, type DownloadPreview, type YouTubeCatalog } from '../../../shared/download'
+import {
+  IPC,
+  type DownloadPreview,
+  type YouTubeBrowser,
+  type YouTubeCatalog,
+} from '../../../shared/download'
 import type { DownloadService } from '../../application/download-service'
 import { centeredContentBounds } from '../window-fit'
 const socialProgressByWebContents = new Map<number, { percent: number; status: string }>()
@@ -118,6 +125,11 @@ export function registerDownloadDialogHandlers(
   const history = new SocialDownloadHistory(
     join(app.getPath('userData'), 'social-download-history.json'),
   )
+  const youtubeAuth = new YouTubeAuthStore(
+    join(app.getPath('userData'), 'youtube-auth.json'),
+    join(app.getPath('userData'), 'youtube-cookies.txt'),
+  )
+  const youtubeAuthStatus = async () => youtubeAuth.status(await hasYouTubeSession())
   ipcMain.handle(IPC.listSocialHistory, () => history.list())
   ipcMain.handle(IPC.socialHistoryAction, async (_event, id: string, action: string) => {
     const record = (await history.list()).find((value) => value.id === id)
@@ -240,7 +252,9 @@ export function registerDownloadDialogHandlers(
       ]
       if (explicitProxy || systemProxy) args.unshift('--proxy', explicitProxy || systemProxy!)
       if (allowInvalidCertificate) args.unshift('--no-check-certificates')
-      const cookieFile = await exportYouTubeCookies()
+      const authArgs = await youtubeAuth.downloaderArgs()
+      const cookieFile = authArgs.length ? undefined : await exportYouTubeCookies()
+      if (authArgs.length) args.unshift(...authArgs)
       if (cookieFile) args.unshift('--cookies', cookieFile.path)
       let raw: string
       try {
@@ -326,7 +340,48 @@ export function registerDownloadDialogHandlers(
       else window.maximize()
     } else if (action === 'close') window.close()
   })
-  ipcMain.handle(IPC.forgetYouTubeSession, () => forgetYouTubeSession())
+  ipcMain.handle(IPC.getYouTubeAuthStatus, youtubeAuthStatus)
+  ipcMain.handle(IPC.useYouTubeBrowser, async (_event, browser) => {
+    await youtubeAuth.useBrowser(browser)
+    await forgetYouTubeSession()
+    return youtubeAuthStatus()
+  })
+  ipcMain.handle(IPC.saveYouTubeCookies, async (_event, cookieText: string) => {
+    await youtubeAuth.saveCookies(typeof cookieText === 'string' ? cookieText : '')
+    await forgetYouTubeSession()
+    return youtubeAuthStatus()
+  })
+  ipcMain.handle(IPC.signInToYouTube, async (event, proxyUrl = '') => {
+    let proxy: string | undefined
+    if (typeof proxyUrl === 'string' && proxyUrl.trim()) {
+      try {
+        const parsed = new URL(proxyUrl.trim())
+        if (
+          !['http:', 'https:', 'socks4:', 'socks5:', 'socks5h:'].includes(parsed.protocol) ||
+          !parsed.hostname ||
+          parsed.search ||
+          parsed.hash ||
+          (parsed.pathname && parsed.pathname !== '/')
+        )
+          throw new Error('Invalid proxy')
+        proxy = parsed.href
+      } catch {
+        throw new Error('Enter a valid HTTP or SOCKS proxy URL, including its port.')
+      }
+    }
+    await signInToYouTube(event.sender, proxy)
+    await youtubeAuth.useAppSession()
+    return youtubeAuthStatus()
+  })
+  ipcMain.handle(IPC.clearYouTubeAuth, async () => {
+    await youtubeAuth.clear()
+    await forgetYouTubeSession()
+    return youtubeAuthStatus()
+  })
+  ipcMain.handle(IPC.forgetYouTubeSession, async () => {
+    await forgetYouTubeSession()
+    await youtubeAuth.clear()
+  })
   ipcMain.handle(IPC.openSocialFile, async (event) => {
     const path = socialFilesByWebContents.get(event.sender.id)
     return path ? shell.openPath(path) : 'No completed download is available.'
@@ -665,12 +720,15 @@ export function registerDownloadDialogHandlers(
                 ? 'system'
                 : 'downloader default',
         })
-        let browserCookies = ''
+        let browserCookies: YouTubeBrowser | '' = ''
+        let configuredAuthArgs = platform === 'youtube' ? await youtubeAuth.downloaderArgs() : []
         const runDownload = async (
           authenticatedRetry = false,
         ): Promise<{ ok: true; filePath: string } | { ok: false; error: string }> => {
           const cookieFile =
-            platform === 'youtube' && !browserCookies ? await exportYouTubeCookies() : undefined
+            platform === 'youtube' && !browserCookies && !configuredAuthArgs.length
+              ? await exportYouTubeCookies()
+              : undefined
           try {
             const result = await new Promise<
               { ok: true; filePath: string } | { ok: false; error: string }
@@ -744,6 +802,7 @@ export function registerDownloadDialogHandlers(
               if (hasFfmpeg) args.splice(args.indexOf('-P'), 0, '--merge-output-format', 'mp4')
               const downloadProxy = explicitProxy || systemProxy
               if (cookieFile) args.unshift('--cookies', cookieFile.path)
+              if (configuredAuthArgs.length && !browserCookies) args.unshift(...configuredAuthArgs)
               if (browserCookies) args.unshift('--cookies-from-browser', browserCookies)
               if (platform === 'youtube') args.unshift('--ignore-config')
               if (downloadProxy) args.unshift('--proxy', downloadProxy)
@@ -896,6 +955,8 @@ export function registerDownloadDialogHandlers(
                     process.env.http_proxy ||
                     process.env.HTTP_PROXY,
                 )
+                await youtubeAuth.useAppSession()
+                configuredAuthArgs = []
               } catch (error) {
                 if (event.sender.isDestroyed()) throw error
                 const choice = await dialog.showMessageBox({
@@ -910,6 +971,9 @@ export function registerDownloadDialogHandlers(
                 })
                 if (choice.response === 2) throw error
                 browserCookies = choice.response === 0 ? 'firefox' : 'chrome'
+                await youtubeAuth.useBrowser(browserCookies)
+                await forgetYouTubeSession()
+                configuredAuthArgs = []
               }
               return await runDownload(true)
             }

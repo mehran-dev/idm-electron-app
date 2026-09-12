@@ -2,7 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 import { IPC, type DownloadApi, type DownloadItem } from '../shared/download'
 const api: DownloadApi = {
   windowAction: (action) => ipcRenderer.invoke(IPC.windowAction, action),
-  version: 12,
+  version: 13,
   fitWindow: (height) => ipcRenderer.invoke(IPC.fitWindow, height),
   listSocialHistory: () => ipcRenderer.invoke(IPC.listSocialHistory),
   socialHistoryAction: (id, action) => ipcRenderer.invoke(IPC.socialHistoryAction, id, action),
@@ -27,6 +27,11 @@ const api: DownloadApi = {
       details,
     ),
   pauseSocialDownload: (taskId) => ipcRenderer.invoke(IPC.pauseSocialDownload, taskId),
+  getYouTubeAuthStatus: () => ipcRenderer.invoke(IPC.getYouTubeAuthStatus),
+  signInToYouTube: (proxyUrl) => ipcRenderer.invoke(IPC.signInToYouTube, proxyUrl),
+  useYouTubeBrowser: (browser) => ipcRenderer.invoke(IPC.useYouTubeBrowser, browser),
+  saveYouTubeCookies: (cookieText) => ipcRenderer.invoke(IPC.saveYouTubeCookies, cookieText),
+  clearYouTubeAuth: () => ipcRenderer.invoke(IPC.clearYouTubeAuth),
   openSocialFile: () => ipcRenderer.invoke(IPC.openSocialFile),
   showSocialFileInFolder: () => ipcRenderer.invoke(IPC.showSocialFileInFolder),
   onSocialProgress: (listener) => {

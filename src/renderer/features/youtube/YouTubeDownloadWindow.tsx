@@ -13,6 +13,7 @@ import {
   Youtube,
 } from 'lucide-react'
 import type { SocialDownloadRecord, YouTubeCatalog } from '../../../shared/download'
+import { YouTubeAccountPanel } from './YouTubeAccountPanel'
 
 const recentChannelsKey = 'nexus.youtube.recent-channels.v1'
 
@@ -385,16 +386,9 @@ export function YouTubeDownloadWindow() {
                 />{' '}
                 Allow untrusted certificates (only on a connection you trust)
               </label>
-              <button
-                onClick={async () => {
-                  await window.downloads.forgetYouTubeSession()
-                  setMessage('Saved YouTube sign-in removed.')
-                }}
-              >
-                Forget saved YouTube sign-in
-              </button>
             </details>
           )}
+          {!loading && <YouTubeAccountPanel proxyUrl={proxy} />}
 
           <div className="youtube-browser-layout">
             <aside className="youtube-recents" aria-label="Recent YouTube channels">

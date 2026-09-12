@@ -3,6 +3,8 @@ import { droppedDownloadUrl } from './features/add-download/dropped-url'
 import { useContentWindowSize } from './hooks/useContentWindowSize'
 import { SocialHistoryWindow } from './features/social-history/SocialHistoryWindow'
 import { YouTubeDownloadWindow } from './features/youtube/YouTubeDownloadWindow'
+import { YouTubeAccountPanel } from './features/youtube/YouTubeAccountPanel'
+import { progressActionsFor } from './features/download-progress/progress-actions'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Archive,
@@ -232,25 +234,7 @@ function SocialDownloadWindow({ platform }: { platform: 'youtube' | 'instagram' 
           </div>
           {!downloading && !completed && (
             <>
-              {platform === 'youtube' && (
-                <small>
-                  <button
-                    disabled={downloading}
-                    onClick={async () => {
-                      try {
-                        await window.downloads.forgetYouTubeSession()
-                        setStatusMessage('Saved YouTube sign-in removed.')
-                      } catch (error) {
-                        setStatusMessage(
-                          error instanceof Error ? error.message : 'Could not remove sign-in.',
-                        )
-                      }
-                    }}
-                  >
-                    Forget YouTube sign-in
-                  </button>
-                </small>
-              )}
+              {platform === 'youtube' && <YouTubeAccountPanel proxyUrl={proxyUrl} />}
               <label htmlFor="social-url">Media address</label>
               <input
                 id="social-url"
@@ -1977,6 +1961,7 @@ function OptionsDialog({
 function DownloadProgress({ item, onClose }: { item: DownloadItem; onClose: () => void }) {
   const [tab, setTab] = useState<'status' | 'speed' | 'completion'>('status'),
     percent = item.totalBytes ? Math.min(100, (item.receivedBytes / item.totalBytes) * 100) : 0
+  const actions = progressActionsFor(item.status)
   const configuredSegmentCount = Math.max(1, item.segmentCount ?? 1)
   const activeSegmentCount = item.segmentProgress?.length ?? configuredSegmentCount
   const segmentValues = Array.from(
@@ -2082,23 +2067,30 @@ function DownloadProgress({ item, onClose }: { item: DownloadItem; onClose: () =
           </>
         )}
         <div className="progress-actions">
-          {item.status === 'downloading' ? (
-            <button className="primary" onClick={() => window.downloads.pause(item.id)}>
-              Pause
+          {actions.primary && (
+            <button
+              className="primary"
+              onClick={() =>
+                actions.primary?.action === 'pause'
+                  ? window.downloads.pause(item.id)
+                  : window.downloads.resume(item.id)
+              }
+            >
+              {actions.primary.label}
             </button>
-          ) : ['paused', 'interrupted', 'failed'].includes(item.status) ? (
-            <button className="primary" onClick={() => window.downloads.resume(item.id)}>
-              Start / Resume
+          )}
+          {actions.destructive && (
+            <button
+              className="danger-button"
+              onClick={async () => {
+                if (actions.destructive?.action === 'cancel') await window.downloads.cancel(item.id)
+                else await window.downloads.removeFromList(item.id)
+                onClose()
+              }}
+            >
+              {actions.destructive.label}
             </button>
-          ) : null}
-          <button
-            onClick={() => {
-              window.downloads.cancel(item.id)
-              onClose()
-            }}
-          >
-            Cancel
-          </button>
+          )}
           <button onClick={onClose}>Close</button>
         </div>
       </div>

@@ -4,6 +4,12 @@ import { join } from 'node:path'
 
 const youtubeSession = () => session.fromPartition('persist:youtube-login')
 let loginInProgress = false
+const authenticationCookies = ['SAPISID', '__Secure-3PAPISID', '__Secure-1PAPISID']
+
+export async function hasYouTubeSession(): Promise<boolean> {
+  const cookies = await youtubeSession().cookies.get({ domain: 'youtube.com' })
+  return cookies.some((cookie) => authenticationCookies.includes(cookie.name))
+}
 
 export function youtubeCookiesText(cookies: Cookie[]): string {
   const rows = cookies
@@ -96,11 +102,7 @@ export async function signInToYouTube(owner: WebContents, proxy?: string): Promi
           const url = new URL(window.webContents.getURL())
           if (!/(^|\.)youtube\.com$/.test(url.hostname)) return
           const cookies = await loginSession.cookies.get({ domain: 'youtube.com' })
-          if (
-            cookies.some((cookie) =>
-              ['SAPISID', '__Secure-3PAPISID', '__Secure-1PAPISID'].includes(cookie.name),
-            )
-          ) {
+          if (cookies.some((cookie) => authenticationCookies.includes(cookie.name))) {
             await loginSession.cookies.flushStore()
             signedIn = true
             if (!window.isDestroyed()) window.close()

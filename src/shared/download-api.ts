@@ -1,6 +1,8 @@
 import type {
   SocialDownloadRecord,
   SocialDownloadProgress,
+  YouTubeAuthStatus,
+  YouTubeBrowser,
   YouTubeCatalog,
   CompletedDoubleClickAction,
   CompletionOptions,
@@ -29,6 +31,11 @@ export const IPC = {
   socialProgress: 'downloads:social-progress',
   getSocialProgress: 'downloads:get-social-progress',
   pauseSocialDownload: 'downloads:pause-social',
+  getYouTubeAuthStatus: 'youtube-auth:status',
+  signInToYouTube: 'youtube-auth:sign-in',
+  useYouTubeBrowser: 'youtube-auth:use-browser',
+  saveYouTubeCookies: 'youtube-auth:save-cookies',
+  clearYouTubeAuth: 'youtube-auth:clear',
   add: 'downloads:add',
   startNow: 'downloads:start-now',
   enqueue: 'downloads:enqueue',
@@ -102,6 +109,11 @@ export interface DownloadApi {
     details?: { title?: string; batchId?: string; batchTitle?: string; taskId?: string },
   ): Promise<{ ok: true; filePath: string } | { ok: false; error: string }>
   pauseSocialDownload(taskId: string): Promise<boolean>
+  getYouTubeAuthStatus(): Promise<YouTubeAuthStatus>
+  signInToYouTube(proxyUrl?: string): Promise<YouTubeAuthStatus>
+  useYouTubeBrowser(browser: YouTubeBrowser): Promise<YouTubeAuthStatus>
+  saveYouTubeCookies(cookieText: string): Promise<YouTubeAuthStatus>
+  clearYouTubeAuth(): Promise<YouTubeAuthStatus>
   openSocialFile(): Promise<string>
   showSocialFileInFolder(): Promise<void>
   onSocialProgress(listener: (value: SocialDownloadProgress) => void): () => void

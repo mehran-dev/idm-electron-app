@@ -89,3 +89,12 @@ export interface SocialDownloadProgress {
   status: string
   taskId?: string
 }
+
+export type YouTubeBrowser = 'firefox' | 'chrome' | 'chromium' | 'brave' | 'edge'
+export interface YouTubeAuthStatus {
+  mode: 'none' | 'app-session' | 'browser' | 'manual'
+  label: string
+  detail: string
+  browser?: YouTubeBrowser
+  updatedAt?: string
+}
