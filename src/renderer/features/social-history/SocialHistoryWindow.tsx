@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Instagram, Youtube } from 'lucide-react'
+import { Instagram, RotateCcw, Trash2, Youtube } from 'lucide-react'
 import type { SocialDownloadRecord } from '../../../shared/download'
 
 export function SocialHistoryWindow() {
@@ -8,6 +8,7 @@ export function SocialHistoryWindow() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
+  const [busyId, setBusyId] = useState('')
   useEffect(() => {
     let active = true
     let pending = false
@@ -37,7 +38,10 @@ export function SocialHistoryWindow() {
       window.removeEventListener('focus', refresh)
     }
   }, [])
-  const action = async (id: string, kind: 'open' | 'folder' | 'copy') => {
+  const action = async (
+    id: string,
+    kind: 'open' | 'folder' | 'copy' | 'remove' | 'delete-file',
+  ) => {
     try {
       const problem = await window.downloads.socialHistoryAction(id, kind)
       setMessage(
@@ -46,6 +50,46 @@ export function SocialHistoryWindow() {
       )
     } catch {
       setMessage('The action could not be completed. Please try again.')
+    }
+  }
+  const remove = async (record: SocialDownloadRecord) => {
+    const deleteFile = Boolean(
+      record.filePath &&
+      window.confirm(
+        'Delete the saved video file too?\n\nOK deletes the file and history entry. Cancel keeps the file.',
+      ),
+    )
+    if (
+      !deleteFile &&
+      !window.confirm('Remove this entry from media history? The saved file will be kept.')
+    )
+      return
+    const problem = await window.downloads.socialHistoryAction(
+      record.id,
+      deleteFile ? 'delete-file' : 'remove',
+    )
+    if (problem) {
+      setMessage(problem)
+      return
+    }
+    setRecords((current) => current.filter((item) => item.id !== record.id))
+    setMessage(
+      deleteFile ? 'Video and history entry deleted.' : 'History entry removed; file kept.',
+    )
+  }
+  const resume = async (record: SocialDownloadRecord) => {
+    setBusyId(record.id)
+    setMessage(`Resuming ${record.title || 'media'} from its saved partial file…`)
+    try {
+      const result = await window.downloads.downloadSocial('youtube', record.url, false, '', {
+        title: record.title,
+        batchId: record.batchId,
+        batchTitle: record.batchTitle,
+      })
+      setMessage(result.ok ? 'Download resumed and completed.' : result.error)
+      setRecords(await window.downloads.listSocialHistory())
+    } finally {
+      setBusyId('')
     }
   }
   const visible = records.filter((record) => filter === 'all' || record.platform === filter)
@@ -90,9 +134,10 @@ export function SocialHistoryWindow() {
                     <Icon aria-label={label} size={24} />
                     <div className="social-history-detail">
                       <strong title={record.filePath || record.url}>
-                        {record.filePath?.split(/[\\/]/).pop() || `${label} media`}
+                        {record.title || record.filePath?.split(/[\\/]/).pop() || `${label} media`}
                       </strong>
                       <small>
+                        {record.batchTitle ? `${record.batchTitle} · ` : ''}
                         {label} · {new Date(record.createdAt).toLocaleString()}
                       </small>
                       <span className={`history-status history-${record.status}`}>
@@ -118,7 +163,17 @@ export function SocialHistoryWindow() {
                             <button onClick={() => action(record.id, 'folder')}>Open folder</button>
                           </>
                         )}
+                        {record.platform === 'youtube' &&
+                          ['failed', 'interrupted'].includes(record.status) && (
+                            <button disabled={busyId === record.id} onClick={() => resume(record)}>
+                              <RotateCcw size={14} />{' '}
+                              {busyId === record.id ? 'Resuming…' : 'Resume'}
+                            </button>
+                          )}
                         <button onClick={() => action(record.id, 'copy')}>Copy link</button>
+                        <button className="history-delete" onClick={() => remove(record)}>
+                          <Trash2 size={14} /> Delete
+                        </button>
                       </div>
                     </div>
                   </li>

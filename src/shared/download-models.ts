@@ -60,4 +60,26 @@ export interface SocialDownloadRecord {
   updatedAt: string
   status: 'downloading' | 'completed' | 'failed' | 'interrupted'
   filePath?: string
+  title?: string
+  batchId?: string
+  batchTitle?: string
+  itemCount?: number
+  completedCount?: number
+}
+
+export interface YouTubeCatalogItem {
+  id: string
+  title: string
+  url: string
+  duration?: number
+  thumbnail?: string
+  itemCount?: number
+}
+
+export interface YouTubeCatalog {
+  kind: 'channel' | 'playlist'
+  title: string
+  url: string
+  playlists: YouTubeCatalogItem[]
+  videos: YouTubeCatalogItem[]
 }

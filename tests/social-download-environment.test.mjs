@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import {
   socialDownloadEnvironment,
   hasCertificateError,
+  socialConnectionError,
 } from '../src/main/infrastructure/social-download-environment.ts'
 
 test('uses installed Linux CA bundle without changing parent environment', () => {
@@ -16,6 +17,11 @@ test('uses installed Linux CA bundle without changing parent environment', () =>
   assert.equal(result.HTTPS_PROXY, source.HTTPS_PROXY)
   assert.equal(result.ELECTRON_RUN_AS_NODE, '1')
   assert.equal(source.SSL_CERT_FILE, undefined)
+})
+test('turns catalog transport failures into actionable messages', () => {
+  assert.match(socialConnectionError('CERTIFICATE_VERIFY_FAILED'), /Allow untrusted certificates/)
+  assert.match(socialConnectionError('Connection reset by peer'), /proxy/)
+  assert.doesNotMatch(socialConnectionError('some extractor failure'), /yt-dlp|issue template/)
 })
 test('preserves explicit trust settings and non-Linux defaults', () => {
   for (const source of [{ SSL_CERT_FILE: '/custom.pem' }, { SSL_CERT_DIR: '/custom' }]) {

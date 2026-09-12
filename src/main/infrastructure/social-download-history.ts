@@ -63,7 +63,16 @@ export class SocialDownloadHistory {
     return this.records.map((record) => ({ ...record }))
   }
 
-  async start(platform: SocialDownloadRecord['platform'], url: string) {
+  async start(
+    platform: SocialDownloadRecord['platform'],
+    url: string,
+    details: Partial<
+      Pick<
+        SocialDownloadRecord,
+        'title' | 'batchId' | 'batchTitle' | 'itemCount' | 'completedCount'
+      >
+    > = {},
+  ) {
     await this.ready
     const now = new Date().toISOString()
     const record: SocialDownloadRecord = {
@@ -73,10 +82,27 @@ export class SocialDownloadHistory {
       createdAt: now,
       updatedAt: now,
       status: 'downloading',
+      ...details,
     }
     this.records.unshift(record)
     await this.persist()
     return record.id
+  }
+
+  async update(id: string, changes: Partial<SocialDownloadRecord>) {
+    await this.ready
+    const record = this.records.find((value) => value.id === id)
+    if (!record) return
+    Object.assign(record, changes, { id: record.id, updatedAt: new Date().toISOString() })
+    await this.persist()
+  }
+
+  async remove(id: string) {
+    await this.ready
+    const index = this.records.findIndex((value) => value.id === id)
+    if (index < 0) return
+    this.records.splice(index, 1)
+    await this.persist()
   }
 
   async finish(

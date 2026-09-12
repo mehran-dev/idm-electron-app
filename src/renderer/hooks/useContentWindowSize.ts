@@ -6,7 +6,7 @@ export function useContentWindowSize() {
     const params = new URLSearchParams(location.search)
     if (
       (!params.has('utilityDialog') && !params.has('listDialog') && !params.has('progress')) ||
-      params.get('utilityDialog') === 'social-history'
+      ['social-history', 'youtube-library'].includes(params.get('utilityDialog') ?? '')
     )
       return
     const root = document.getElementById('root')!

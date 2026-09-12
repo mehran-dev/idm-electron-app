@@ -59,3 +59,17 @@ test('does not overwrite corrupt history with a new empty list', async (t) => {
   await assert.rejects(history.start('youtube', 'https://youtu.be/example'))
   assert.equal(await readFile(path, 'utf8'), 'broken-json')
 })
+test('stores playlist context and removes only the selected entry', async (t) => {
+  const path = await fixture(t)
+  const history = new SocialDownloadHistory(path)
+  const first = await history.start('youtube', 'https://youtu.be/one', {
+    title: 'Episode one',
+    batchId: 'batch-1',
+    batchTitle: 'Course playlist',
+  })
+  await history.start('youtube', 'https://youtu.be/two', { batchId: 'batch-1' })
+  await history.remove(first)
+  const records = await history.list()
+  assert.equal(records.length, 1)
+  assert.equal(records[0].url, 'https://youtu.be/two')
+})

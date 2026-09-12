@@ -12,7 +12,14 @@ import {
   screen,
 } from 'electron'
 import { basename, join } from 'node:path'
-import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { spawn } from 'node:child_process'
 import {
   exportYouTubeCookies,
@@ -22,9 +29,10 @@ import {
 import {
   socialDownloadEnvironment,
   hasCertificateError,
+  socialConnectionError,
 } from '../../infrastructure/social-download-environment'
 import { resolveSocialDownloadTools } from '../../infrastructure/social-download-tools'
-import { IPC, type DownloadPreview } from '../../../shared/download'
+import { IPC, type DownloadPreview, type YouTubeCatalog } from '../../../shared/download'
 import type { DownloadService } from '../../application/download-service'
 import { centeredContentBounds } from '../window-fit'
 const socialProgressByWebContents = new Map<number, { percent: number; status: string }>()
@@ -114,6 +122,17 @@ export function registerDownloadDialogHandlers(
       clipboard.writeText(record.url)
       return ''
     }
+    if (action === 'remove' || action === 'delete-file') {
+      if (action === 'delete-file' && record.filePath && existsSync(record.filePath)) {
+        try {
+          unlinkSync(record.filePath)
+        } catch {
+          return 'The saved item could not be deleted. It may be a folder or currently in use.'
+        }
+      }
+      await history.remove(id)
+      return ''
+    }
     if (!['open', 'folder'].includes(action)) return 'Unknown history action.'
     if (record.status !== 'completed' || !record.filePath) return 'No completed file is available.'
     if (!existsSync(record.filePath)) return 'The saved file has been moved or deleted.'
@@ -121,6 +140,164 @@ export function registerDownloadDialogHandlers(
     shell.showItemInFolder(record.filePath)
     return ''
   })
+  ipcMain.handle(
+    IPC.inspectYouTube,
+    async (event, inputValue: string, allowInvalidCertificate = false, proxyUrl = '') => {
+      const input = inputValue.trim()
+      if (!input) throw new Error('Enter a channel name, handle, or playlist link.')
+      let source: URL
+      try {
+        source = new URL(input)
+        if (
+          source.protocol !== 'https:' ||
+          !/(^|\.)youtube\.com$|(^|\.)youtu\.be$/i.test(source.hostname)
+        )
+          throw new Error('invalid')
+      } catch {
+        const handle = input.replace(/^@/, '').replace(/\s+/g, '')
+        if (!/^[A-Za-z0-9._-]+$/.test(handle))
+          throw new Error('Enter a YouTube @handle or a complete playlist link.')
+        source = new URL(`https://www.youtube.com/@${handle}/playlists`)
+      }
+      const isVideo = source.hostname.endsWith('youtu.be') || source.searchParams.has('v')
+      const isPlaylist = !isVideo && source.searchParams.has('list')
+      if (!isVideo && !isPlaylist && !/\/playlists\/?$/i.test(source.pathname))
+        source.pathname = `${source.pathname.replace(/\/$/, '')}/playlists`
+      let explicitProxy: string | undefined
+      if (proxyUrl.trim()) {
+        try {
+          const parsed = new URL(proxyUrl.trim())
+          if (
+            !['http:', 'https:', 'socks4:', 'socks5:', 'socks5h:'].includes(parsed.protocol) ||
+            !parsed.hostname ||
+            parsed.search ||
+            parsed.hash ||
+            (parsed.pathname && parsed.pathname !== '/')
+          )
+            throw new Error('Invalid proxy')
+          explicitProxy = parsed.href
+        } catch {
+          throw new Error(
+            'Enter a valid HTTP or SOCKS proxy URL from your VPN app, including its port.',
+          )
+        }
+      }
+      const hasEnvironmentProxy = [
+        'https_proxy',
+        'HTTPS_PROXY',
+        'all_proxy',
+        'ALL_PROXY',
+        'http_proxy',
+        'HTTP_PROXY',
+      ].some((key) => Boolean(process.env[key]))
+      let systemProxy: string | undefined
+      if (!explicitProxy && !hasEnvironmentProxy) {
+        try {
+          const route = await event.sender.session.resolveProxy(source.href)
+          const match = /^(PROXY|HTTPS|SOCKS4|SOCKS5|SOCKS)\s+(\S+)$/i.exec(
+            route.split(';')[0]?.trim() ?? '',
+          )
+          if (match) {
+            const scheme = {
+              PROXY: 'http',
+              HTTPS: 'https',
+              SOCKS4: 'socks4',
+              SOCKS5: 'socks5',
+              SOCKS: 'socks4',
+            }[match[1]!.toUpperCase()]
+            systemProxy = `${scheme}://${match[2]}`
+          }
+        } catch {
+          console.warn('[youtube-catalog] system proxy resolution failed')
+        }
+      }
+      const { downloader } = resolveSocialDownloadTools({
+        appPath: app.getAppPath(),
+        resourcesPath: process.resourcesPath,
+      })
+      const args = [
+        '--ignore-config',
+        '--flat-playlist',
+        '--dump-single-json',
+        '--no-warnings',
+        '--socket-timeout',
+        '20',
+        '--retries',
+        '3',
+        '--extractor-retries',
+        '3',
+        '--retry-sleep',
+        'http:exp=1:4',
+        '--compat-options',
+        'no-certifi',
+        '--js-runtimes',
+        `node:${process.execPath}`,
+        source.href,
+      ]
+      if (explicitProxy || systemProxy) args.unshift('--proxy', explicitProxy || systemProxy!)
+      if (allowInvalidCertificate) args.unshift('--no-check-certificates')
+      const cookieFile = await exportYouTubeCookies()
+      if (cookieFile) args.unshift('--cookies', cookieFile.path)
+      let raw: string
+      try {
+        raw = await new Promise<string>((resolve, reject) => {
+          const child = spawn(downloader, args, {
+            stdio: ['ignore', 'pipe', 'pipe'],
+            env: socialDownloadEnvironment(process.env),
+          })
+          let stdout = ''
+          let stderr = ''
+          child.stdout.on('data', (chunk) => (stdout += String(chunk)))
+          child.stderr.on('data', (chunk) => (stderr += String(chunk)))
+          const stop = () => child.kill()
+          event.sender.once('destroyed', stop)
+          child.once('error', reject)
+          child.once('close', (code) => {
+            event.sender.removeListener('destroyed', stop)
+            if (code === 0) resolve(stdout)
+            else reject(new Error(stderr.trim() || 'YouTube lookup failed.'))
+          })
+        })
+      } catch (error) {
+        const details = error instanceof Error ? error.message : String(error)
+        console.error('[youtube-catalog]', details)
+        throw new Error(socialConnectionError(details))
+      } finally {
+        await cookieFile?.cleanup()
+      }
+      const data = JSON.parse(raw) as Record<string, unknown>
+      const entries = Array.isArray(data.entries) ? data.entries : []
+      const rawItems = entries.length || !isVideo ? entries : [data]
+      const items = rawItems
+        .filter((entry): entry is Record<string, unknown> =>
+          Boolean(entry && typeof entry === 'object'),
+        )
+        .map((entry) => {
+          const id = String(entry.id ?? '')
+          const entryUrl = String(entry.webpage_url ?? entry.url ?? '')
+          return {
+            id,
+            title: String(entry.title ?? 'Untitled video'),
+            url: /^https?:\/\//.test(entryUrl)
+              ? entryUrl
+              : isPlaylist
+                ? `https://www.youtube.com/watch?v=${id}`
+                : `https://www.youtube.com/playlist?list=${id}`,
+            duration: typeof entry.duration === 'number' ? entry.duration : undefined,
+            thumbnail: typeof entry.thumbnail === 'string' ? entry.thumbnail : undefined,
+            itemCount: typeof entry.playlist_count === 'number' ? entry.playlist_count : undefined,
+          }
+        })
+        .filter((entry) => entry.id && entry.url)
+      return {
+        kind: isPlaylist || isVideo ? 'playlist' : 'channel',
+        title: String(data.title ?? data.channel ?? 'YouTube'),
+        url: source.href,
+        playlists: isPlaylist || isVideo ? [] : items,
+        videos: isPlaylist || isVideo ? items : [],
+      } satisfies YouTubeCatalog
+    },
+  )
   ipcMain.handle(IPC.fitWindow, (event, requestedHeight: number) => {
     if (!Number.isFinite(requestedHeight) || requestedHeight <= 0) return { clamped: false }
     const window = BrowserWindow.fromWebContents(event.sender)
@@ -128,7 +305,8 @@ export function registerDownloadDialogHandlers(
     const params = new URL(event.sender.getURL()).searchParams
     if (!params.has('utilityDialog') && !params.has('listDialog') && !params.has('progress'))
       return { clamped: false }
-    if (params.get('utilityDialog') === 'social-history') return { clamped: false }
+    if (['social-history', 'youtube-library'].includes(params.get('utilityDialog') ?? ''))
+      return { clamped: false }
     const bounds = window.getBounds()
     const area = screen.getDisplayMatching(bounds).workArea
     window.setMinimumSize(Math.min(400, area.width), 120)
@@ -252,12 +430,21 @@ export function registerDownloadDialogHandlers(
     IPC.showUtilityWindow,
     (
       _event,
-      mode: 'add' | 'scheduler' | 'options' | 'delete' | 'youtube' | 'instagram' | 'social-history',
+      mode:
+        | 'add'
+        | 'scheduler'
+        | 'options'
+        | 'delete'
+        | 'youtube'
+        | 'youtube-library'
+        | 'instagram'
+        | 'social-history',
       ids: string[],
       queueId?: string,
     ) => {
       const sizes = {
         'social-history': [780, 560],
+        'youtube-library': [880, 720],
         add: [620, 180],
         scheduler: [680, 570],
         options: [760, 620],
@@ -267,6 +454,7 @@ export function registerDownloadDialogHandlers(
       } as const
       const titles = {
         'social-history': 'Media download history',
+        'youtube-library': 'YouTube offline library',
         add: 'Add download',
         scheduler: 'Scheduler',
         options: 'Options',
@@ -275,7 +463,7 @@ export function registerDownloadDialogHandlers(
         instagram: 'Download from Instagram',
       }
       if (!(mode in sizes)) throw new Error('Unknown window type')
-      if (mode === 'social-history') {
+      if (mode === 'social-history' || mode === 'youtube-library') {
         const existing = BrowserWindow.getAllWindows().find((window) =>
           window.webContents.getURL().includes('utilityDialog=social-history'),
         )
@@ -316,6 +504,7 @@ export function registerDownloadDialogHandlers(
       urlValue: string,
       allowInvalidCertificate = false,
       proxyUrl = '',
+      details: { title?: string; batchId?: string; batchTitle?: string } = {},
     ) => {
       if (!['youtube', 'instagram'].includes(platform))
         return { ok: false as const, error: 'Unknown media provider.' }
@@ -377,7 +566,13 @@ export function registerDownloadDialogHandlers(
           platform === 'youtube' && savedUrl.searchParams.has('v')
             ? new URLSearchParams({ v: savedUrl.searchParams.get('v')! }).toString()
             : ''
-        historyId = await history.start(platform, savedUrl.href)
+        const safeDetails = {
+          title: typeof details?.title === 'string' ? details.title.slice(0, 500) : undefined,
+          batchId: typeof details?.batchId === 'string' ? details.batchId.slice(0, 100) : undefined,
+          batchTitle:
+            typeof details?.batchTitle === 'string' ? details.batchTitle.slice(0, 500) : undefined,
+        }
+        historyId = await history.start(platform, savedUrl.href, safeDetails)
       } catch {
         return {
           ok: false as const,
@@ -490,6 +685,7 @@ export function registerDownloadDialogHandlers(
               )
               const args = [
                 '--no-playlist',
+                '--continue',
                 '--socket-timeout',
                 '20',
                 '--retry-sleep',

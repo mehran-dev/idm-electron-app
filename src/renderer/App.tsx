@@ -2,6 +2,7 @@ import { DuplicateNotice } from './features/add-download/DuplicateNotice'
 import { droppedDownloadUrl } from './features/add-download/dropped-url'
 import { useContentWindowSize } from './hooks/useContentWindowSize'
 import { SocialHistoryWindow } from './features/social-history/SocialHistoryWindow'
+import { YouTubeDownloadWindow } from './features/youtube/YouTubeDownloadWindow'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Archive,
@@ -25,6 +26,7 @@ import {
   Instagram,
   Link2,
   ListStart,
+  ListVideo,
   Music2,
   Play,
   Settings,
@@ -70,6 +72,7 @@ export function App() {
   const listDialog = params.get('listDialog')
   const utilityDialog = params.get('utilityDialog')
   if (utilityDialog === 'social-history') return <SocialHistoryWindow />
+  if (utilityDialog === 'youtube-library') return <YouTubeDownloadWindow />
   if (id) return <ProgressWindow id={id} />
   if (listDialog === 'import' || listDialog === 'export')
     return <ListDialogWindow mode={listDialog} params={params} />
@@ -1293,6 +1296,13 @@ function MainApp() {
           color="red"
           title="Download permitted media from YouTube"
           onClick={() => window.downloads.showUtilityWindow('youtube')}
+        />
+        <Tool
+          icon={<ListVideo />}
+          label="YT Offline"
+          color="red"
+          title="Browse YouTube channels and download playlists for offline viewing"
+          onClick={() => window.downloads.showUtilityWindow('youtube-library')}
         />
         <Tool
           icon={<History />}

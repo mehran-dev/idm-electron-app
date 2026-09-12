@@ -1,5 +1,6 @@
 import type {
   SocialDownloadRecord,
+  YouTubeCatalog,
   CompletedDoubleClickAction,
   CompletionOptions,
   DownloadItem,
@@ -19,6 +20,7 @@ export const IPC = {
   showUtilityWindow: 'downloads:show-utility-window',
   listSocialHistory: 'social-history:list',
   socialHistoryAction: 'social-history:action',
+  inspectYouTube: 'youtube:inspect',
   downloadSocial: 'downloads:download-social',
   forgetYouTubeSession: 'downloads:forget-youtube-session',
   openSocialFile: 'downloads:open-social-file',
@@ -67,18 +69,35 @@ export interface DownloadApi {
   showProgress(id: string): Promise<void>
   showListWindow(mode: 'import' | 'export', ids: string[], queueId?: string): Promise<void>
   showUtilityWindow(
-    mode: 'add' | 'scheduler' | 'options' | 'delete' | 'youtube' | 'instagram' | 'social-history',
+    mode:
+      | 'add'
+      | 'scheduler'
+      | 'options'
+      | 'delete'
+      | 'youtube'
+      | 'youtube-library'
+      | 'instagram'
+      | 'social-history',
     ids?: string[],
     queueId?: string,
   ): Promise<void>
   listSocialHistory(): Promise<SocialDownloadRecord[]>
-  socialHistoryAction(id: string, action: 'open' | 'folder' | 'copy'): Promise<string>
+  socialHistoryAction(
+    id: string,
+    action: 'open' | 'folder' | 'copy' | 'remove' | 'delete-file',
+  ): Promise<string>
+  inspectYouTube(
+    input: string,
+    allowInvalidCertificate?: boolean,
+    proxyUrl?: string,
+  ): Promise<YouTubeCatalog>
   forgetYouTubeSession(): Promise<void>
   downloadSocial(
     platform: 'youtube' | 'instagram',
     url: string,
     allowInvalidCertificate?: boolean,
     proxyUrl?: string,
+    details?: { title?: string; batchId?: string; batchTitle?: string },
   ): Promise<{ ok: true; filePath: string } | { ok: false; error: string }>
   openSocialFile(): Promise<string>
   showSocialFileInFolder(): Promise<void>

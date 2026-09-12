@@ -6,6 +6,8 @@ const api: DownloadApi = {
   fitWindow: (height) => ipcRenderer.invoke(IPC.fitWindow, height),
   listSocialHistory: () => ipcRenderer.invoke(IPC.listSocialHistory),
   socialHistoryAction: (id, action) => ipcRenderer.invoke(IPC.socialHistoryAction, id, action),
+  inspectYouTube: (input, allowInvalidCertificate, proxyUrl) =>
+    ipcRenderer.invoke(IPC.inspectYouTube, input, allowInvalidCertificate, proxyUrl),
   list: () => ipcRenderer.invoke(IPC.list),
   inspect: (url) => ipcRenderer.invoke(IPC.inspect, url),
   chooseSavePath: (path) => ipcRenderer.invoke(IPC.chooseSavePath, path),
@@ -15,8 +17,15 @@ const api: DownloadApi = {
   showUtilityWindow: (mode, ids = [], queueId) =>
     ipcRenderer.invoke(IPC.showUtilityWindow, mode, ids, queueId),
   forgetYouTubeSession: () => ipcRenderer.invoke(IPC.forgetYouTubeSession),
-  downloadSocial: (platform, url, allowInvalidCertificate, proxyUrl) =>
-    ipcRenderer.invoke(IPC.downloadSocial, platform, url, allowInvalidCertificate, proxyUrl),
+  downloadSocial: (platform, url, allowInvalidCertificate, proxyUrl, details) =>
+    ipcRenderer.invoke(
+      IPC.downloadSocial,
+      platform,
+      url,
+      allowInvalidCertificate,
+      proxyUrl,
+      details,
+    ),
   openSocialFile: () => ipcRenderer.invoke(IPC.openSocialFile),
   showSocialFileInFolder: () => ipcRenderer.invoke(IPC.showSocialFileInFolder),
   onSocialProgress: (listener) => {
